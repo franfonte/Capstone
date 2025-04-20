@@ -1,0 +1,61 @@
+data,kernel,bw_algorithm,h,mse
+Normal,Gaussian,Scott,0.73395,2.29946
+Normal,Gaussian,Silverman,0.34921,0.93781
+Normal,Gaussian,MLCV,0.79465,2.7012
+Normal,Epanechnikov,Scott,0.73395,0.91404
+Normal,Epanechnikov,Silverman,0.34921,1.28828
+Normal,Epanechnikov,MLCV,1.76451,2.90299
+Normal,Cosine,Scott,0.73395,0.90874
+Normal,Cosine,Silverman,0.34921,1.33161
+Normal,Cosine,MLCV,1.82995,2.94541
+Normal,Linear,Scott,0.73395,0.90807
+Normal,Linear,Silverman,0.34921,1.4756
+Normal,Linear,MLCV,1.95245,2.87626
+Normal,-,Scott,0.73395,1.25758
+Normal,-,Silverman,0.34921,1.25833
+Normal,-,MLCV,1.58539,2.85646
+Bimodal (Normal),Gaussian,Scott,2.10754,3.43586
+Bimodal (Normal),Gaussian,Silverman,1.00275,1.23139
+Bimodal (Normal),Gaussian,MLCV,1.50421,2.29176
+Bimodal (Normal),Epanechnikov,Scott,2.10754,1.21222
+Bimodal (Normal),Epanechnikov,Silverman,1.00275,0.5784
+Bimodal (Normal),Epanechnikov,MLCV,1.0,0.57819
+Bimodal (Normal),Cosine,Scott,2.10754,1.15126
+Bimodal (Normal),Cosine,Silverman,1.00275,0.57687
+Bimodal (Normal),Cosine,MLCV,1.0,0.57676
+Bimodal (Normal),Linear,Scott,2.10754,1.02033
+Bimodal (Normal),Linear,Silverman,1.00275,0.58212
+Bimodal (Normal),Linear,MLCV,1.0,0.58225
+Bimodal (Normal),-,Scott,2.10754,1.70492
+Bimodal (Normal),-,Silverman,1.00275,0.7422
+Bimodal (Normal),-,MLCV,1.12605,1.00724
+Bimodal (Exp),Gaussian,Scott,0.84238,11.56077
+Bimodal (Exp),Gaussian,Silverman,0.22505,5.63154
+Bimodal (Exp),Gaussian,MLCV,1.85648,22.67991
+Bimodal (Exp),Epanechnikov,Scott,0.84238,8.12537
+Bimodal (Exp),Epanechnikov,Silverman,0.22505,6.49739
+Bimodal (Exp),Epanechnikov,MLCV,4.48539,26.96531
+Bimodal (Exp),Cosine,Scott,0.84238,7.89209
+Bimodal (Exp),Cosine,Silverman,0.22505,6.53113
+Bimodal (Exp),Cosine,MLCV,4.55817,26.44653
+Bimodal (Exp),Linear,Scott,0.84238,7.13008
+Bimodal (Exp),Linear,Silverman,0.22505,6.58255
+Bimodal (Exp),Linear,MLCV,4.7119,24.3052
+Bimodal (Exp),-,Scott,0.84238,8.67708
+Bimodal (Exp),-,Silverman,0.22505,6.31065
+Bimodal (Exp),-,MLCV,3.90298,25.09924
+Bimodal (Uniform),Gaussian,Scott,0.37734,17.41226
+Bimodal (Uniform),Gaussian,Silverman,0.14143,21.95156
+Bimodal (Uniform),Gaussian,MLCV,0.21211,17.83763
+Bimodal (Uniform),Epanechnikov,Scott,0.37734,19.94762
+Bimodal (Uniform),Epanechnikov,Silverman,0.14143,37.21784
+Bimodal (Uniform),Epanechnikov,MLCV,0.44902,18.51361
+Bimodal (Uniform),Cosine,Scott,0.37734,20.23536
+Bimodal (Uniform),Cosine,Silverman,0.14143,38.37752
+Bimodal (Uniform),Cosine,MLCV,0.45434,18.62996
+Bimodal (Uniform),Linear,Scott,0.37734,20.56309
+Bimodal (Uniform),Linear,Silverman,0.14143,41.39774
+Bimodal (Uniform),Linear,MLCV,0.37734,20.56309
+Bimodal (Uniform),-,Scott,0.37734,19.53958
+Bimodal (Uniform),-,Silverman,0.14143,34.73616
+Bimodal (Uniform),-,MLCV,0.3732,18.88607
