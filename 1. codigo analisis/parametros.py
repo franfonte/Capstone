@@ -19,7 +19,8 @@ dict_unidades = {
     "GA": 4,
     "ED": 5,
     "WL": 6, # agrego WL y PS para mantener la misma nomenclatura en la simulación
-    "PS": 7
+    "PS": 7,
+    "END": 8 # agrego END para mantener la misma nomenclatura en la simulación, nodo termino
 }
 
 # nombres_DRG: nombre de los DRG
