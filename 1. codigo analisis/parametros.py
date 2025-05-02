@@ -11,13 +11,15 @@ dict_hospitales = {
     "Hospital_3": 3
 }
 
-# nombre_unidades: nombre de las unidades
+# nombre_unidades: nombre de las unidades, iternas y externas
 dict_unidades = {
     "OR": 1,
     "ICU": 2,
     "SDU/WARD": 3,
     "GA": 4,
-    "ED": 5
+    "ED": 5,
+    "WL": 6, # agrego WL y PS para mantener la misma nomenclatura en la simulación
+    "PS": 7
 }
 
 # nombres_DRG: nombre de los DRG
@@ -537,7 +539,7 @@ dict_costo_espera_wl = {
     }
 }
 
-# phi_2: Costo espera de paciente en GA del hospital h (dict_costo_espera_ga[drg][unidad])
+# phi_2: Costo espera de paciente en GA del hospital h (dict_costo_espera_ga[hospital][drg][unidad])
 dict_costo_espera_ga = {
     dict_hospitales["Hospital_1"]: {
         dict_drg["DRG_1"]: {
