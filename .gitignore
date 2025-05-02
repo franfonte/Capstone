@@ -172,3 +172,6 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Archivos pesados
+0. codigo simulación/resultados incertidumbre
