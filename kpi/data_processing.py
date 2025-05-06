@@ -52,5 +52,18 @@ def add_transition_rows(dataframe):
             
     return dataframe 
 
+def process_timelog(timelog_path):
+    # Load the timelog
+    dataframe = timelog_to_dataframe(timelog_path)
+    
+    # Add length of stay
+    dataframe = add_length_of_stay(dataframe)
+    
+    # Add transition rows
+    dataframe = add_transition_rows(dataframe)
+    
+    return dataframe
+
+
             
         
