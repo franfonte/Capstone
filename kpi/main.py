@@ -14,8 +14,10 @@ def main():
     # Process the selected timelog
     dataframe = data_processing.process_timelog(selected_timelog_path)
 
+    kpis = kpi_calculations.calculate_kpis(dataframe)
     
-    
+    # Print the KPIs
+    kpi_calculations.print_kpis(kpis)
 
 if __name__ == "__main__":
     main()
