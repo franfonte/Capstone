@@ -9,3 +9,9 @@ def select_timelog(path):
     timelog_path = os.path.join(path, timelogs[selected_timelog])
     print(f"You selected: {timelogs[selected_timelog]}")
     return timelog_path
+
+def lookup(df, column, value):
+    return df[df[column] == value]
+
+def unique_values(df, column):
+    return df[column].unique()
