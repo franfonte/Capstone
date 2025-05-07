@@ -57,6 +57,9 @@ def add_transition_rows(dataframe):
 
     return dataframe
 
+def save_dataframe_to_csv(dataframe, output_path):
+    dataframe.to_csv(output_path, index=False)
+
 def process_timelog(timelog_path):
     # Load the timelog
     dataframe = timelog_to_dataframe(timelog_path)
@@ -66,6 +69,11 @@ def process_timelog(timelog_path):
     
     # Add transition rows
     dataframe = add_transition_rows(dataframe)
+
+    # Save the processed dataframe to a new CSV file 
+    output_path = timelog_path.replace('.csv', '_processed.csv')
+    save_dataframe_to_csv(dataframe, output_path)
+    print(f"Processed timelog saved to: {output_path}")
     
     return dataframe
 
