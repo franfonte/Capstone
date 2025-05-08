@@ -10,12 +10,22 @@ def timelog_to_dataframe(timelog_path):
     dataframe = pd.read_csv(timelog_path)
     return dataframe
 
-def add_length_of_stay(dataframe):
+def add_length_of_stay_column(dataframe):
     # Agrego LOS a cada fila
     dataframe["LOS"] = dataframe["TF"] - dataframe["TI"]
     return dataframe
 
-def add_transition_rows(dataframe):
+def add_derivation_column(dataframe):
+    # Agrego derivacion a cada fila
+    dataframe["DERIVACION"] = np.where(dataframe["UBICACIÓN"] == "PS_PS", 1, 0)
+    return dataframe
+
+
+
+    
+
+
+def add_rows(dataframe):
     new_rows = []
     for i in range(len(dataframe) - 1):
         row_current = dataframe.iloc[i]
@@ -27,6 +37,7 @@ def add_transition_rows(dataframe):
         time_gap = row_current['TF'] < row_next['TI']
         same_hospital = row_current['HOSPITAL'] == row_next['HOSPITAL']
 
+        #creamos filas trancision
         if same_id and same_ms and time_gap:
             # Crear fila intermedia
             new_row = {
@@ -40,6 +51,21 @@ def add_transition_rows(dataframe):
                 'UNIDAD': row_current['UNIDAD']
             }
             new_rows.append((i + 1, new_row))  # guardar con índice de inserción
+        
+        #if ubicacion of next row is PS_PS and same id, add a row that 
+        if same_id and row_next['UBICACIÓN'] == 'PS_PS':
+            # Crear fila intermedia
+            new_row = {
+                'ID': row_current['ID'],
+                'MS_GRD': row_current['MS_GRD'],
+                'UBICACIÓN': f"{row_current['UBICACIÓN']} -> {row_next['UBICACIÓN']}",
+                'TI': row_current['TF'],
+                'TF': row_next['TI'],
+                'LOS': row_next['TI'] - row_current['TF'],
+                'HOSPITAL': row_current['HOSPITAL'],
+                'UNIDAD': row_current['UNIDAD']
+            }
+            new_rows.append((i + 1, new_row))
     
     new_rows_list = [fila[1] for fila in new_rows]
 
@@ -65,10 +91,13 @@ def process_timelog(timelog_path):
     dataframe = timelog_to_dataframe(timelog_path)
     
     # Add length of stay
-    dataframe = add_length_of_stay(dataframe)
+    dataframe = add_length_of_stay_column(dataframe)
+
+    # Add derivation column
+    dataframe = add_derivation_column(dataframe)
     
     # Add transition rows
-    dataframe = add_transition_rows(dataframe)
+    dataframe = add_rows(dataframe)
 
     # Save the processed dataframe to a new CSV file 
     output_path = timelog_path.replace('.csv', '_processed.csv')
