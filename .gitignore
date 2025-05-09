@@ -174,4 +174,4 @@ cython_debug/
 .pypirc
 
 # Archivos pesados
-0. codigo simulación/resultados incertidumbre
+simulacion/0. codigo simulación/resultados incertidumbre/incertidumbre_simulada.json
