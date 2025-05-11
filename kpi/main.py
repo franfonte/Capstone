@@ -12,12 +12,15 @@ def main():
     selected_timelog_path = helpers.select_timelog(timelogs_folder_path)
 
     # Process the selected timelog
+    print(f"Processing timelog: {selected_timelog_path}")
     dataframe = data_processing.process_timelog(selected_timelog_path)
 
-    kpis = kpi_calculations.calculate_kpis(dataframe)
+    #ask user which kpis to calculate
+    selected_kpis = helpers.select_kpis()
     
-    # Print the KPIs
-    kpi_calculations.print_kpis(kpis)
+
+    kpis = kpi_calculations.calculate_kpis(dataframe,selected_kpis)
+
 
 if __name__ == "__main__":
     main()
