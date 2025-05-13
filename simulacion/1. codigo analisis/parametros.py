@@ -40,21 +40,21 @@ dict_capacidades = {
     dict_hospitales["Hospital_1"]: {
         dict_unidades["OR"]: 6,
         dict_unidades["ICU"]: 60,
-        dict_unidades["SDU/WARD"]: 165,
+        dict_unidades["SDU/WARD"]: 155,
         dict_unidades["GA"]: 15,
         dict_unidades["ED"]: 15
     },
     dict_hospitales["Hospital_2"]: {
         dict_unidades["OR"]: 6,
         dict_unidades["ICU"]: 60,
-        dict_unidades["SDU/WARD"]: 165,
+        dict_unidades["SDU/WARD"]: 155,
         dict_unidades["GA"]: 15,
         dict_unidades["ED"]: 15
     },
     dict_hospitales["Hospital_3"]: {
         dict_unidades["OR"]: 6,
         dict_unidades["ICU"]: 60,
-        dict_unidades["SDU/WARD"]: 165,
+        dict_unidades["SDU/WARD"]: 155,
         dict_unidades["GA"]: 15,
         dict_unidades["ED"]: 15
     }
