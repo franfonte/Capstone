@@ -175,3 +175,9 @@ cython_debug/
 
 # Archivos pesados
 simulacion/0. codigo simulación/resultados incertidumbre/incertidumbre_simulada.json
+simulacion/1. codigo analisis/resultados incertidumbre
+simulacion/1. codigo analisis/plots
+simulacion/0. codigo simulación/resultados simulacion
+simulacion/0. codigo simulación/resultados modificados
+simulacion/0. codigo simulación/resultados incertidumbre
+simulacion/0. codigo simulación/log original
