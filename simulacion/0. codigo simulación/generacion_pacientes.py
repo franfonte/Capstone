@@ -154,12 +154,12 @@ def generar_pacientes(seed = 42, cantidad_de_ciclos = 5000):
         with open(path, 'w') as f:
             json.dump(data_dict, f, indent=4)
         # print(f"Dictionary saved to: {path}") # Esto es lo unico distinto con respecto al original
-        print("La incertidumbre de los pacientes ha sido generada y guardada en el archivo JSON.")
+        # print("La incertidumbre de los pacientes ha sido generada y guardada en el archivo JSON.")
     # Save the results to a JSON file
     # Save the results to a JSON file in a folder relative to the script's directory
     output_folder = os.path.join(base_path, "resultados incertidumbre")
-    save_dict_as_json(incertidumbre_pacientes, filename="incertidumbre_simulada.json", folder=output_folder)
+    save_dict_as_json(incertidumbre_pacientes, filename=f"{seed}_{cantidad_de_ciclos}.json", folder=output_folder)
 
 if __name__ == "__main__":
     # Llamar a la función para generar pacientes
-    generar_pacientes(seed=42, cantidad_de_ciclos=5000)
+    generar_pacientes(seed=12, cantidad_de_ciclos=4208)
