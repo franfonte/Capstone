@@ -377,13 +377,21 @@ def unit_counts_all_hospitals_fast(df, start_time=10000, end_time=40000, grid=Fa
 
     return result_dict
 
-def calcular_kpis(df, start_time=10000, end_time=40000, detallado = True, show_plot=False, save_plot=False, modelo=None, seed=None, ciclos=None):
+def calcular_kpis(df, start_time=10000, end_time=40000, detallado=True, show_plot=False, save_plot=False, modelo=None, seed=None, ciclos=None, save_dir=None):
     kpis = {}
     kpis["LOS_hospitalizado"] = compute_los_hospitalizado(df, start_time, end_time)
     kpis["LOS_lista_espera"] = compute_los_lista_espera_total(df, start_time, end_time)
     kpis["costo_diario_promedio"] = compute_costo_diario_promedio(df, start_time, end_time)
     kpis["costo_promedio_paciente"] = compute_costo_promedio_paciente(df, start_time, end_time)
     kpis["tasa_entrada_vs_salida"] = compute_tasa_entrada_vs_salida(df, start_time, end_time)
+
+    save_path = None
+    if save_plot and save_dir and modelo and seed is not None and ciclos is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        T_max = df["TF"].max()
+        filename = f"{modelo.__class__.__name__}_{seed}_{ciclos}_{T_max}.png"
+        save_path = os.path.join(save_dir, filename)
+
     kpis["ocupaciones"] = unit_counts_all_hospitals_fast(
         df, start_time, end_time,
         detallado=detallado,
@@ -392,6 +400,7 @@ def calcular_kpis(df, start_time=10000, end_time=40000, detallado = True, show_p
         modelo=modelo,
         seed=seed,
         ciclos=ciclos,
+        save_path=save_path,
         grid=True
     )
     return kpis
