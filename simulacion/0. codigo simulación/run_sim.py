@@ -43,7 +43,7 @@ if __name__ == "__main__":
     df = simu.simular()
 
     # Guardar CSV
-    nombre_csv = f"{nombre_base}_{seed}_{ciclos}_{T_max}.csv"
+    nombre_csv = f"{seed}.csv"
     df.to_csv(os.path.join(carpeta_logs, nombre_csv), index=False)
 
     # Calcular KPIs
@@ -59,5 +59,5 @@ if __name__ == "__main__":
     print(f"✅ KPIs calculados en {time.time() - t0:.2f}s")
 
     # Guardar KPIs en JSON
-    with open(os.path.join(carpeta_kpis, f"kpis_{seed}.json"), "w") as f:
+    with open(os.path.join(carpeta_kpis, f"{seed}.json"), "w") as f:
         json.dump(kpis, f, indent=4)

@@ -519,6 +519,40 @@ class Hospital: # Revisado, funciona bien
             lines.append(f"  - {unidad_id}: {unidad.ocupacion}/{unidad.capacidad}")
         return "\n".join(lines)
 
+class ModeloBase:
+
+    def __init__(self):
+        self.decisiones = [{}, {}, {}, {}]
+        self.ciclo = 1
+        
+    def cargar_decisiones(self, simulacion):
+        for grd in [5, 6, 7, 8]:
+            for requerimiento in [p.dict_unidades["OR"], p.dict_unidades["ICU"], p.dict_unidades["SDU/WARD"]]:
+                for paciente in simulacion.wl.sub_listas[requerimiento][grd]:
+                    decisiones_ciclo = paciente.decisiones.get(str(self.ciclo), None)
+                    if decisiones_ciclo is not None:
+                        for decision in range(len(decisiones_ciclo)):
+                            self.decisiones[decision][paciente] = decisiones_ciclo[decision]
+                            
+
+
+        for id_hospital, hospital in simulacion.hospitales.items():
+            if id_hospital != 0: # No considero WL
+                for unidad_id, unidad in hospital.unidades.items():
+                    for paciente in unidad.pacientes:
+                        decisiones_ciclo = paciente.decisiones.get(str(self.ciclo), None)
+                        if decisiones_ciclo is not None:
+                            for decision in range(len(decisiones_ciclo)):
+                                self.decisiones[decision][paciente] = decisiones_ciclo[decision]
+
+    def tomar_decisiones(self, simulacion):
+        # Reinicio las variables
+        self.decisiones = [{}, {}, {}, {}]
+        # Copio localmente las ocupaciones de cada hospital
+        self.cargar_decisiones(simulacion)
+        self.ciclo += 1
+        return self.decisiones
+
 class Modelo:
 
     def __init__(self):

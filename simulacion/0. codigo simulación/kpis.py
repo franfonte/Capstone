@@ -389,7 +389,7 @@ def calcular_kpis(df, start_time=10000, end_time=40000, detallado=True, show_plo
     if save_plot and save_dir and modelo and seed is not None and ciclos is not None:
         os.makedirs(save_dir, exist_ok=True)
         T_max = df["TF"].max()
-        filename = f"{modelo.__class__.__name__}_{seed}_{ciclos}_{T_max}.png"
+        filename = f"{seed}.png"
         save_path = os.path.join(save_dir, filename)
 
     kpis["ocupaciones"] = unit_counts_all_hospitals_fast(
