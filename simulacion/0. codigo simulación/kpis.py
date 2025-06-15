@@ -46,40 +46,62 @@ def filter_by_patient_activity_period(df, start_time=10000, end_time=40000):
 # 1. LOS hospitalizado
 def compute_los_hospitalizado(df, start_time=10000, end_time=40000):
     valid_units = ['GA', 'ED', 'OR', 'ICU', 'SDU_WARD']
+    split_units = ['OR', 'ICU', 'SDU_WARD']
     hospitals = ['Hospital_1', 'Hospital_2', 'Hospital_3']
 
-    # Step 0: Exclude patients who ever entered PS
-    ps_patients = df[df['UNIDAD'] == 'PS']['ID'].unique()
+    # Paso 1: excluir pacientes que pasaron por PS
+    ps_ids = df.loc[df['UNIDAD'] == 'PS', 'ID'].unique()
 
-    # Step 0: Base filtering — keep only relevant units and hospitals, and exclude PS patients
+    # Paso 2: filtrar unidades, hospitales y PS
     df_filtered = df[
-        (df['HOSPITAL'].isin(hospitals)) &
-        (df['UNIDAD'].isin(valid_units)) &
-        (~df['ID'].isin(ps_patients))
+        df['HOSPITAL'].isin(hospitals) &
+        df['UNIDAD'].isin(valid_units) &
+        ~df['ID'].isin(ps_ids)
     ]
 
-    # Step 1: Base filtering — keep only relevant hospital units
-    df_filtered = df[
-        (df['HOSPITAL'].isin(hospitals)) &
-        (df['UNIDAD'].isin(valid_units))
-    ]
+    # Paso 3: aplicar filtro de tiempo (en el orden correcto)
+    df_filtered = filter_by_patient_activity_period(df_filtered, start_time, end_time).copy()
 
-    # Step 2: Identify patients active within the time window
-    df_filtered = filter_by_patient_activity_period(df_filtered, start_time, end_time)
-
-    # Step 3: Calculate averages
-
-    # LOS per hospital and unit
-    los_by_hospital_unit = (
-        df_filtered
-        .groupby(['HOSPITAL', 'UNIDAD'])['LOS']
-        .mean()
-        .round(2)
-        .unstack(fill_value=None)
-        .to_dict(orient='index')
+    # Paso 4: clasificar registros como 'espera' o 'tratamiento' (vectorizado)
+    condiciones_espera = (
+        (df_filtered['UNIDAD'].isin(split_units) & df_filtered['UBICACIÓN'].str.contains('->', na=False)) |
+        (~df_filtered['UNIDAD'].isin(split_units))  # GA y ED
     )
+    df_filtered.loc[:, 'TIPO'] = 'tratamiento'
+    df_filtered.loc[condiciones_espera, 'TIPO'] = 'espera'
 
-    # Step 1: sum LOS per patient per hospital
+    # Paso 5: agrupación y cálculo de promedios y conteos
+    agg = df_filtered.groupby(['HOSPITAL', 'UNIDAD', 'TIPO'])['LOS'].agg(['count', 'mean']).reset_index()
+
+    # Paso 6: construir estructura con claves "espera" y "tratamiento"
+    por_hospital_y_unidad = {}
+    for (hospital, unidad), sub in agg.groupby(['HOSPITAL', 'UNIDAD']):
+        sub = sub.set_index('TIPO')
+        n_espera = sub.at['espera', 'count'] if 'espera' in sub.index else 0
+        n_trat = sub.at['tratamiento', 'count'] if 'tratamiento' in sub.index else 0
+        n_total = n_espera + n_trat
+
+        if n_total == 0:
+            continue
+
+        prom_espera = sub.at['espera', 'mean'] if 'espera' in sub.index else 0
+        prom_trat = sub.at['tratamiento', 'mean'] if 'tratamiento' in sub.index else 0
+
+        ponderado_espera = round(prom_espera * n_espera / n_total, 2) if n_espera > 0 else 0.0
+        ponderado_trat = round(prom_trat * n_trat / n_total, 2) if n_trat > 0 else 0.0
+
+        if hospital not in por_hospital_y_unidad:
+            por_hospital_y_unidad[hospital] = {}
+
+        if unidad in split_units:
+            por_hospital_y_unidad[hospital][unidad] = {
+                "espera": ponderado_espera,
+                "tratamiento": ponderado_trat
+            }
+        else:
+            por_hospital_y_unidad[hospital][unidad] = round(ponderado_espera, 2)
+
+    # Paso 7: promedio LOS total por paciente por hospital
     patient_los = (
         df_filtered
         .groupby(['ID', 'HOSPITAL'])['LOS']
@@ -87,8 +109,7 @@ def compute_los_hospitalizado(df, start_time=10000, end_time=40000):
         .reset_index()
     )
 
-    # Step 2: average across patients per hospital
-    los_by_hospital = (
+    promedio_por_hospital = (
         patient_los
         .groupby('HOSPITAL')['LOS']
         .mean()
@@ -96,8 +117,8 @@ def compute_los_hospitalizado(df, start_time=10000, end_time=40000):
         .to_dict()
     )
 
-    # LOS per unit (across all hospitals)
-    los_by_unit = (
+    # Paso 8: promedio LOS por unidad
+    promedio_por_unidad = (
         df_filtered
         .groupby('UNIDAD')['LOS']
         .mean()
@@ -106,9 +127,9 @@ def compute_los_hospitalizado(df, start_time=10000, end_time=40000):
     )
 
     return {
-        "por_hospital_y_unidad": los_by_hospital_unit,
-        "promedio_por_hospital": los_by_hospital,
-        "promedio_por_unidad": los_by_unit
+        "por_hospital_y_unidad": por_hospital_y_unidad,
+        "promedio_por_hospital": promedio_por_hospital,
+        "promedio_por_unidad": promedio_por_unidad
     }
 
 # 2. LOS en lista de espera
@@ -138,24 +159,53 @@ def compute_costo_diario_promedio(df, start_time=10000, end_time=40000):
     ciclos = int(total_hours // 12)  # Integer number of 12-hour cycles
     if ciclos == 0:
         return {
-            "social": 0, "derivaciones_wl": 0, "derivaciones_ed": 0,
+            "espera_en_wl": 0, "espera_en_hospitales": 0, "social": 0, "derivaciones_wl": 0, "derivaciones_ed": 0,
             "traslados": 0, "operativo": 0, "total": 0
         }
 
     # Individual cost components
+    df_wl = df[df["HOSPITAL"] == "WL"]
+    df_hosp = df[df["HOSPITAL"] != "WL"]
+    espera_wl = df_wl["COSTO ESPERA"].sum()
+    espera_hosp = df_hosp["COSTO ESPERA"].sum()
     costo_social = df["COSTO ESPERA"].sum()
     costo_wl = df["COSTO DER WL"].sum()
     costo_ed = df["COSTO DER ED"].sum()
     costo_traslados = df["COSTO TRASLADO"].sum()
 
+    # Agrupar por hospital y calcular componentes
+    hospitals = ['Hospital_1', 'Hospital_2', 'Hospital_3']
+    df_hosp = df[df["HOSPITAL"].isin(hospitals)]
+
+    grouped = df_hosp.groupby("HOSPITAL")[
+        ["COSTO ESPERA", "COSTO DER ED", "COSTO TRASLADO"]
+    ].sum()
+
+    costos_por_hospital = {}
+    for hospital, row in grouped.iterrows():
+        espera = row["COSTO ESPERA"]
+        der_ed = row["COSTO DER ED"]
+        traslados = row["COSTO TRASLADO"]
+
+        costos_por_hospital[hospital] = {
+            "social_en_hospital": round(espera / ciclos, 2),
+            "derivaciones_ed": round(der_ed / ciclos, 2),
+            "traslados": round(traslados / ciclos, 2),
+            "operativo": round((der_ed + traslados) / ciclos, 2),
+            "total": round((espera + der_ed + traslados) / ciclos, 2)
+        }
+
     # Compute average cost per 12-hour cycle
     return {
+        "General": {"social_en_wl": round(espera_wl / ciclos, 2),
+        "social_en_hospitales": round(espera_hosp / ciclos, 2),
         "social": round(costo_social / ciclos, 2),
         "derivaciones_wl": round(costo_wl / ciclos, 2),
         "derivaciones_ed": round(costo_ed / ciclos, 2),
         "traslados": round(costo_traslados / ciclos, 2),
         "operativo": round((costo_wl + costo_ed + costo_traslados) / ciclos, 2),
-        "total": round((costo_social + costo_wl + costo_ed + costo_traslados) / ciclos, 2)
+        "total": round((costo_social + costo_wl + costo_ed + costo_traslados) / ciclos, 2)},
+        "Por hospital": costos_por_hospital
     }
 
 # 4. Costo promedio por paciente
