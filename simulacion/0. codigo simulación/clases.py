@@ -714,6 +714,8 @@ class Modelo:
             self.decisiones.append(dict_temporal)
 
     def cambios_internos_hospital(self, id_hospital): # Revisar
+        """Aca se realiza una competencia entre todas la unidades del mismo hospital, compitiendo por camas libres,
+        y tiene mayor prioridad el que represente un mayor costo de espera de no ser atendido"""
         dict_temporal_ga = {}
         dict_temporal = {}
         pacientes_que_meti_desde_ga = []
