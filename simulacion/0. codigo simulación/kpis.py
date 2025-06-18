@@ -280,7 +280,91 @@ def compute_tasa_entrada_vs_salida(df, start_time=10000, end_time=40000):
         "ratio_salida_entrada_sin_ps": round(salidas_sdu / total_entradas, 2) if total_entradas > 0 else 0
     }
 
-# 6. Tasa de ocupación de camas
+# 6. Proporcion entradas y salidas
+def compute_proporcion_entradas_salidas(df, start_time=10000, end_time=40000):
+    df = df.copy()
+    df = filter_by_patient_activity_period(df, start_time, end_time)
+
+    # Obtener primeras y últimas filas por paciente
+    entradas = df.groupby("ID", as_index=False).first()
+    salidas = df.groupby("ID", as_index=False).last()
+
+    # Agrupar y contar ocurrencias
+    entradas_grouped = entradas.groupby(["HOSPITAL", "MS_GRD", "requerimiento_inicial"], as_index=False).size().rename(columns={"size": "conteo"})
+    salidas_grouped = salidas.groupby(["HOSPITAL", "MS_GRD", "requerimiento_inicial"], as_index=False).size().rename(columns={"size": "conteo"})
+
+    # Corregir entradas inválidas (5–8 en hospitales → WL)
+    mask_invalid = (entradas_grouped["HOSPITAL"] != "WL") & (entradas_grouped["MS_GRD"].between(5, 8))
+    if mask_invalid.any():
+        entradas_invalidas = entradas_grouped[mask_invalid].copy()
+        entradas_invalidas.loc[:, "HOSPITAL"] = "WL"
+        entradas_validas = entradas_grouped[~mask_invalid]
+        entradas_grouped = pd.concat([entradas_validas, entradas_invalidas], ignore_index=True)
+        entradas_grouped = entradas_grouped.groupby(["HOSPITAL", "MS_GRD", "requerimiento_inicial"], as_index=False)["conteo"].sum()
+
+    salidas_grouped = salidas_grouped[salidas_grouped["HOSPITAL"] != "WL"]
+
+    def inicializar_dict(lugares):
+        return {
+            lugar: {
+                "promedio": 0,
+                **{ms: {"promedio": 0, 1: 0, 2: 0, 3: 0} for ms in range(1, 9)}
+            } for lugar in lugares
+        }
+
+    def redondear_dict(diccionario):
+        for lugar_data in diccionario.values():
+            lugar_data["promedio"] = round(float(lugar_data["promedio"]), 2)
+            for ms_data in lugar_data.values():
+                if isinstance(ms_data, dict):
+                    ms_data["promedio"] = round(float(ms_data["promedio"]), 2)
+                    for req in [1, 2, 3]:
+                        ms_data[req] = round(float(ms_data[req]), 2)
+        return diccionario
+
+    def limpiar_ms_grd_invalidos_entradas(diccionario):
+        for lugar in ["Hospital_1", "Hospital_2", "Hospital_3"]:
+            for ms in range(5, 9):
+                diccionario[lugar].pop(ms, None)
+        for ms in range(1, 5):
+            diccionario["WL"].pop(ms, None)
+        return diccionario
+
+    entradas_dict = inicializar_dict(["Hospital_1", "Hospital_2", "Hospital_3", "WL"])
+    salidas_dict = inicializar_dict(["Hospital_1", "Hospital_2", "Hospital_3", "PS"])
+
+    total_entradas = int(entradas_grouped["conteo"].sum())
+    total_salidas = int(salidas_grouped["conteo"].sum())
+
+    for row in entradas_grouped.itertuples(index=False):
+        lugar, ms, req, conteo = row
+        if (lugar in ["Hospital_1", "Hospital_2", "Hospital_3"] and 1 <= ms <= 4) or (lugar == "WL" and 5 <= ms <= 8):
+            valor = (conteo / total_entradas) * 100 if total_entradas else 0.0
+            entradas_dict[lugar][ms][req] += valor
+            entradas_dict[lugar][ms]["promedio"] += valor
+            entradas_dict[lugar]["promedio"] += valor
+
+    for row in salidas_grouped.itertuples(index=False):
+        lugar, ms, req, conteo = row
+        valor = (conteo / total_salidas) * 100 if total_salidas else 0.0
+        salidas_dict[lugar][ms][req] += valor
+        salidas_dict[lugar][ms]["promedio"] += valor
+        salidas_dict[lugar]["promedio"] += valor
+
+    entradas_dict = redondear_dict(entradas_dict)
+    salidas_dict = redondear_dict(salidas_dict)
+    entradas_dict = limpiar_ms_grd_invalidos_entradas(entradas_dict)
+
+    return {
+        "total": {
+            "entradas": total_entradas,
+            "salidas": total_salidas
+        },
+        "entradas": entradas_dict,
+        "salidas": salidas_dict
+    }
+
+# 7. Tasa de ocupación de camas
 def unit_counts_all_hospitals_fast(df, start_time=10000, end_time=40000, grid=False, show_plot=True, save_plot=False, save_path=None, detallado=True, modelo=None, seed=None, ciclos=None):
     tl = df.copy()
     step = 6
@@ -434,6 +518,7 @@ def calcular_kpis(df, start_time=10000, end_time=40000, detallado=True, show_plo
     kpis["costo_diario_promedio"] = compute_costo_diario_promedio(df, start_time, end_time)
     kpis["costo_promedio_paciente"] = compute_costo_promedio_paciente(df, start_time, end_time)
     kpis["tasa_entrada_vs_salida"] = compute_tasa_entrada_vs_salida(df, start_time, end_time)
+    kpis["proporcion_entradas_salidas"] = compute_proporcion_entradas_salidas(df, start_time, end_time)
 
     save_path = None
     if save_plot and save_dir and modelo and seed is not None and ciclos is not None:
@@ -454,3 +539,84 @@ def calcular_kpis(df, start_time=10000, end_time=40000, detallado=True, show_plo
         grid=True
     )
     return kpis
+
+# Extras
+def generar_cake_plots(distribucion, seccion="entradas", por_grd=True, por_requerimiento=False, mapa_orden=None):
+    """
+    Genera gráficos de torta (pie charts) por hospital.
+
+    Parámetros:
+    - distribucion: dict generado por construir_dict_distribucion()
+    - seccion: "entradas" o "salidas"
+    - por_grd: si True, separa por MS_GRD
+    - por_requerimiento: si True, divide cada GRD por requerimientos (1, 2, 3)
+    - mapa_orden: dict opcional {MS_GRD: posicion} para controlar el orden de color (1=rojo, 8=verde)
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
+
+    datos = distribucion[seccion]
+
+    # Si no se pasa un mapa_orden, usar el orden natural
+    if mapa_orden is None:
+        mapa_orden = {ms: ms for ms in range(1, 9)}
+
+    # Escala de colores rojo-verde
+    cmap = cm.get_cmap('RdYlGn')
+    colores_grd = {ms: cmap((mapa_orden[ms] - 1) / 7) for ms in range(1, 9)}
+
+    for hospital, contenido in datos.items():
+        if hospital == "promedio" or hospital == "total":
+            continue
+
+        if por_grd and por_requerimiento:
+            for ms_grd in range(1, 9):
+                if ms_grd not in contenido:
+                    continue
+                detalles = contenido[ms_grd]
+                valores = [detalles[1], detalles[2], detalles[3]]
+                etiquetas = [f"Req {i}" for i in [1, 2, 3]]
+
+                if sum(valores) == 0:
+                    continue
+
+                plt.figure(figsize=(4, 4))
+                plt.pie(valores, labels=etiquetas, autopct='%1.1f%%', startangle=90)
+                plt.title(f"{seccion.capitalize()} - {hospital}, MS_GRD {ms_grd}")
+                plt.axis('equal')
+                plt.show()
+
+        elif por_grd and not por_requerimiento:
+            valores = []
+            etiquetas = []
+            colores = []
+            for ms_grd in range(1, 9):
+                if ms_grd not in contenido:
+                    continue
+                valor = contenido[ms_grd]["promedio"]
+                if valor > 0:
+                    valores.append(valor)
+                    etiquetas.append(f"MS_GRD {ms_grd}")
+                    colores.append(colores_grd[ms_grd])
+            if valores:
+                plt.figure(figsize=(4, 4))
+                plt.pie(valores, labels=etiquetas, colors=colores, autopct='%1.1f%%', startangle=90)
+                plt.title(f"{seccion.capitalize()} - {hospital} (Distribución por MS_GRD)")
+                plt.axis('equal')
+                plt.show()
+
+        elif not por_grd:
+            valores = [0, 0, 0]
+            for ms_grd in range(1, 9):
+                if ms_grd in contenido:
+                    valores[0] += contenido[ms_grd][1]
+                    valores[1] += contenido[ms_grd][2]
+                    valores[2] += contenido[ms_grd][3]
+
+            if sum(valores) > 0:
+                etiquetas = [f"Req {i}" for i in [1, 2, 3]]
+                plt.figure(figsize=(4, 4))
+                plt.pie(valores, labels=etiquetas, autopct='%1.1f%%', startangle=90)
+                plt.title(f"{seccion.capitalize()} - {hospital} (Distribución por requerimiento)")
+                plt.axis('equal')
+                plt.show()
