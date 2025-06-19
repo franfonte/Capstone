@@ -1268,6 +1268,530 @@ class ModeloA(Modelo):
         self.ciclo += 1
         return self.decisiones
 
+class ModeloProactivo(ModeloA):
+    """Modelo que implementa una estrategia proactiva para manejar el flujo de pacientes en el hospital."""
+    def __init__(self):
+        super().__init__()
+        demanda_ed, demanda_wl = self.generar_demanda_ed_wl()
+        self.demanda_ed = demanda_ed
+        self.demanda_wl = demanda_wl
+        self.matrices, self.los_OR, self.los = self.cargar_datos_iniciales()
+        self.tasa_derivacion_deseada = 0.5
+        self.derivaciones_realizadas = 0
+    
+    ################# Todas estas son funciones nuevas para medir y estimar demanda ################
+
+    # Cargar de datos iniciales (archivos incertidumbre base)
+    def generar_demanda_ed_wl(self):
+    
+        def cargar_llegadas_y_estimar_esperados(path_relativo="../1. codigo analisis/resultados incertidumbre/llegadas.json"):
+            ruta = os.path.abspath(path_relativo)
+            
+            with open(ruta, "r") as file:
+                datos_llegadas = json.load(file)
+
+            esperados = {}
+
+            for hospital_id, requerimientos in datos_llegadas.items():
+                hospital_id = int(hospital_id)
+                for req_id, grds in requerimientos.items():
+                    req_id = int(req_id)
+                    for grd_id, contenido in grds.items():
+                        grd_id = int(grd_id)
+                        if "final_kde_pmf" in contenido:
+                            pmf = contenido["final_kde_pmf"]
+                            esperado = sum(i * p for i, p in enumerate(pmf))
+                            clave = (hospital_id, req_id, grd_id)
+                            esperados[clave] = esperado
+
+            return esperados
+
+        def generar_bloque_deterministico_preciso(promedio_deseado):
+            """
+            Genera un bloque determinístico con longitud igual a 10^donde d = cantidad de decimales de promedio_deseado.
+            Esto asegura una representación exacta del promedio si los decimales son finitos.
+
+            Retorna: lista de enteros que alternan entre base y base+1, con promedio igual al deseado.
+            """
+            # Obtener número de decimales del número como string
+            partes = str(promedio_deseado).split(".")
+            decimales = len(partes[1]) if len(partes) == 2 else 0
+            largo_bloque = 10 ** decimales if decimales > 0 else 1
+
+            base = int(float(promedio_deseado))
+            extra = promedio_deseado - base
+            n_altos = round(extra * largo_bloque)
+            n_bajos = largo_bloque - n_altos
+
+            bloque = [base] * largo_bloque
+
+            if n_altos > 0:
+                paso = largo_bloque / n_altos
+                for i in range(n_altos):
+                    idx = round(i * paso)
+                    if idx >= largo_bloque:
+                        idx = largo_bloque - 1
+                    while bloque[idx] == base + 1:
+                        idx = (idx + 1) % largo_bloque
+                    bloque[idx] = base + 1
+
+            if extra >= 0.5:
+                bloque = bloque[::-1]  # Invertir el bloque si el promedio es mayor o igual a 0.5
+
+            return bloque
+
+        def transformar_df_a_dict(df):
+            """
+            Transforma un DataFrame con columnas:
+            ['hospital_id', 'requerimiento', 'total_esperado', 'demanda_ciclo']
+            a un diccionario anidado {hospital_id: {requerimiento: {total_esperado, llegadas}}}
+            """
+            resultado = {}
+
+            for _, row in df.iterrows():
+                hosp = row["hospital_id"]
+                req = row["requerimiento"]
+                esperado = row["total_esperado"]
+                llegadas = row["demanda_ciclo"]
+
+                if hosp not in resultado:
+                    resultado[hosp] = {}
+
+                resultado[hosp][req] = {
+                    "total_esperado": esperado,
+                    "d_ciclo": llegadas
+                }
+
+            return resultado
+        
+        llegadas = cargar_llegadas_y_estimar_esperados()
+        df_llegadas = pd.DataFrame([
+            {"hospital_id": int(k[0]), "requerimiento": int(k[1]), "GRD": int(k[2]), "esperado": round(v,2)}
+            for k, v in llegadas.items()
+        ])
+
+        # Demanda de ED
+        df_llegadas_ed = df_llegadas[df_llegadas["hospital_id"] != 0].copy()
+        df_llegadas_ed["costo"] = df_llegadas_ed.apply(lambda row: p.dict_costo_derivar_ed[row["hospital_id"]][row["GRD"]][row["requerimiento"]], axis=1)
+        df_llegadas_ed["costo_esperado"] = round(df_llegadas_ed["esperado"] * df_llegadas_ed["costo"],2)
+        ed_mod = df_llegadas_ed.groupby(["hospital_id", "requerimiento"]).agg(
+            total_esperado=("esperado", "sum"),
+            total_costo_esperado=("costo_esperado", "sum")
+        ).reset_index().sort_values(by=["hospital_id", "requerimiento"])
+        ed_mod["demanda_ciclo"] = ed_mod.apply(lambda row: generar_bloque_deterministico_preciso(row["total_esperado"]), axis=1)
+        demanda_ed = transformar_df_a_dict(ed_mod)
+
+        # Demanda de WL
+        df_demanda_wl = df_llegadas[df_llegadas["hospital_id"] == 0].copy()
+        wl_mod = df_demanda_wl.groupby(["hospital_id", "requerimiento"]).agg(total_esperado=("esperado", "sum")
+        ).reset_index().sort_values(by=["hospital_id", "requerimiento"])
+        wl_mod["demanda_ciclo"] = wl_mod.apply(lambda row: generar_bloque_deterministico_preciso(row["total_esperado"]), axis=1)
+        demanda_wl = transformar_df_a_dict(wl_mod)
+        
+        return demanda_ed, demanda_wl
+    
+    def cargar_datos_iniciales(self):
+        """
+        Carga y convierte los archivos de matrices, los_OR y los.
+        Devuelve: matrices, los_OR, los (ya con llaves convertidas).
+        """
+        def convertir_llaves_a_int(diccionario):
+            mapeo_especial = {"ICU": 2, "SDU_WARD": 3}
+            if isinstance(diccionario, dict):
+                nuevo_dicc = {}
+                for k, v in diccionario.items():
+                    try:
+                        clave = int(k)
+                    except ValueError:
+                        clave = k
+                    if clave in mapeo_especial:
+                        clave = mapeo_especial[clave]
+                    nuevo_dicc[clave] = convertir_llaves_a_int(v)
+                return nuevo_dicc
+            elif isinstance(diccionario, list):
+                return [convertir_llaves_a_int(i) for i in diccionario]
+            else:
+                return diccionario
+
+        def cargar_y_convertir(ruta):
+            with open(ruta, "r") as f:
+                return convertir_llaves_a_int(json.load(f))
+
+        matrices = cargar_y_convertir("../1. codigo analisis/resultados incertidumbre/matrices.json")
+        los_OR = cargar_y_convertir("../1. codigo analisis/resultados incertidumbre/los_OR.json")
+        los = cargar_y_convertir("../1. codigo analisis/resultados incertidumbre/los.json")
+
+        return matrices, los_OR, los
+    
+    # Estimar demanda para todas las ED por ciclo
+    def demandas_ed_por_ciclo(self, ciclo):
+            """
+            Retorna un diccionario con los valores de camas a asignar en un ciclo específico
+            para todas las combinaciones de hospital y requerimiento.
+
+            Parámetros:
+            - ciclo (int): número de ciclo
+            - dict_camas (dict): diccionario con estructura:
+                {hospital_id: {requerimiento: {"d_ciclo": [valores_por_ciclo]}}}
+
+            Retorna:
+            - dict: {hospital_id: {requerimiento: valor_para_ciclo}}
+            """
+            dict_camas = self.demanda_ed
+            resultado = {}
+            for hospital_id, requerimientos in dict_camas.items():
+                resultado[hospital_id] = {}
+                for requerimiento, datos in requerimientos.items():
+                    d_ciclo = datos["d_ciclo"]
+                    valor = d_ciclo[ciclo % len(d_ciclo)]
+                    resultado[hospital_id][requerimiento] = valor
+            return resultado
+
+    # Estimar demanda interna para todos los hospitales por ciclo
+    def probabilidad_condicional_de_cura_ciclo_siguiente(self, pmf, ciclo_actual):
+        """
+        Calcula la probabilidad condicional de que un paciente se cure en el siguiente ciclo,
+        dado que ya ha estado 'ciclo_actual' ciclos en la unidad sin curarse.
+
+        Usa: P(X = t+1 | X > t) = pmf[t] / sum(pmf[t:])
+
+        Args:
+            pmf (list of float): distribución de probabilidad discreta (PMF), donde
+                                pmf[0] = P(cura en 1 ciclo), pmf[1] = P(cura en 2 ciclos), etc.
+            ciclo_actual (int): número de ciclos completos que ha estado en la unidad (0 si acaba de llegar)
+
+        Returns:
+            float: probabilidad condicional de curarse en el próximo ciclo.
+                Retorna 0.0 si ya superó el soporte de la PMF.
+        """
+        if ciclo_actual < 0:
+            raise ValueError("El ciclo_actual no puede ser negativo.")
+        if ciclo_actual >= len(pmf):
+            return 0.0  # Fuera del soporte de la PMF: ya no puede curarse
+
+        prob_restante = sum(pmf[ciclo_actual:])
+        if prob_restante == 0:
+            return 0.0  # No queda probabilidad de curarse
+        return pmf[ciclo_actual] / prob_restante
+
+    def probabilidad_terminar_y_costo_espera(self, paciente):
+        hospital_id = paciente.hospital_actual
+        grd = paciente.grd
+        unidad_actual = paciente.unidad_actual
+        # Selección del archivo correcto según la unidad
+        if unidad_actual == p.dict_unidades["OR"]:  # OR
+            pmf_los = self.los_OR[hospital_id][grd]["final_kde_pmf"]
+        else:
+            pmf_los = self.los[hospital_id][unidad_actual][grd]["final_kde_pmf"]
+        # Transiciones posibles desde la unidad actual
+        m = self.matrices[hospital_id][grd][unidad_actual]
+        lista_transicion = [m[1], m[2], m[3]]  # A: OR, ICU, SDU_WARD
+        # Tiempo que lleva en la unidad
+        tiempo_en_unidad = paciente.tiempo_actual - paciente.ti_evento_actual
+        probabilidad_terminar = self.probabilidad_condicional_de_cura_ciclo_siguiente(pmf_los, tiempo_en_unidad)
+        
+        costos_espera = []
+        for unidad in range(1,4):
+            costo = p.dict_costo_espera_hospitalizado[hospital_id][grd][unidad_actual][unidad]
+            costos_espera.append(costo)
+        
+        return [x * probabilidad_terminar for x in lista_transicion], costos_espera
+
+    def demandas_internas_por_ciclo(self):
+        demandas = {}
+        resumen = {}
+        for hospital in range(1, 4):
+            demandas[hospital] = {}
+            resumen[hospital] = {}
+            # print(f"Hospital {hospital}")
+            for unidad in range(1, 4):
+                demandas[hospital][unidad] = {}
+                resumen[hospital][unidad] = {}
+                # print(f"  Unidad {unidad}")
+                terminados = 0
+                t_detalle = [0,0,0]
+                atendiendo_se_van = 0
+                asvan = [[0,0,0]]
+                atendiendo = 0
+                a_detalle = [[0,0,0]]
+
+                for paciente in self.actual[hospital][unidad]:
+                    if paciente.esperando:
+                        terminados += 1
+                        t_detalle[paciente.unidad_requerida - 1] += 1
+                    else:
+                        prob, costos = self.probabilidad_terminar_y_costo_espera(paciente)
+                        if sum(prob) == 1:
+                            atendiendo_se_van += 1
+                            asvan.append(np.array(prob))
+                        else:
+                            atendiendo += 1
+                            a_detalle.append(np.array(prob))
+
+                cantidad = len(self.actual[hospital][unidad])
+                finalizados = t_detalle
+                finalizaran = np.round((np.sum(asvan, axis=0)), 2).tolist()
+                incierto = np.round(np.sum(a_detalle, axis=0), 2).tolist()
+                
+                if unidad == 3:
+                    finalizados_fin = finalizados[-1]
+                    finalizaran_fin = finalizaran[-1]
+                    incierto_fin = incierto[-1]
+                    finalizados[-1] = 0
+                    finalizaran[-1] = 0
+                    incierto[-1] = 0
+                    finalizados.append(finalizados_fin)
+                    finalizaran.append(finalizaran_fin)
+                    incierto.append(incierto_fin)
+
+                total = np.round(np.array(finalizados) + np.array(finalizaran) + np.array(incierto),2)
+
+
+                demandas[hospital][unidad] = {
+                    "finalizados": finalizados,
+                    "finalizaran": finalizaran,
+                    "incierto": incierto,
+                    "total": total.tolist()
+                }
+
+            for tipo in ["finalizados", "finalizaran", "incierto", "total"]:
+                flujos_esperados_por_origen = {
+                    1: demandas[hospital][1][tipo],
+                    2: demandas[hospital][2][tipo],
+                    3: demandas[hospital][3][tipo]
+                    }
+                unidades = [1, 2, 3]
+                flujo_neto = {unidad: 0.0 for unidad in unidades}
+                for origen, flujo in flujos_esperados_por_origen.items():
+                    for destino, cantidad in zip(unidades, flujo):
+                        # Entradas suman +, salidas restan -
+                        flujo_neto[destino] += cantidad
+                    flujo_neto[origen] -= sum(flujo)
+                for unidad in unidades:
+                    flujo_neto[unidad] = round(flujo_neto[unidad], 2)
+                demandas[hospital][tipo] = flujo_neto
+                if tipo == "total":
+                    resumen[hospital] = flujo_neto
+            demandas[hospital]["neto"] = round(sum(demandas[hospital]["total"].values()),2)
+        return resumen, demandas
+    
+    ################################################################################################
+
+    ############ Estas funciones originales se cambiaron para que el modelo sea proactivo ##########
+    def atender_wl(self):
+        # Meter al GA
+        meter_a_ga_modo_dict = []
+        internar_modo_dict = []
+
+        primero = (self.ciclo % 3) + 1
+        segundo = ((self.ciclo + 1) % 3) + 1
+        tercero = ((self.ciclo + 2) % 3) + 1
+
+        # Meto a todos los pacientes que pueda al parecer, igual extraño
+        camas_libres = {
+        p.dict_hospitales[f"Hospital_{primero}"]: {
+            p.dict_unidades["OR"]: 0,
+            p.dict_unidades["ICU"]: 0,
+            p.dict_unidades["SDU/WARD"]: 0
+        },
+        p.dict_hospitales[f"Hospital_{segundo}"]: {
+            p.dict_unidades["OR"]: 0,
+            p.dict_unidades["ICU"]: 0,
+            p.dict_unidades["SDU/WARD"]: 0
+        },
+        p.dict_hospitales[f"Hospital_{tercero}"]: {
+            p.dict_unidades["OR"]: 0,
+            p.dict_unidades["ICU"]: 0,
+            p.dict_unidades["SDU/WARD"]: 0
+        }
+        }
+
+        capacidades = {
+            p.dict_hospitales["Hospital_1"]: {
+            p.dict_unidades["OR"]: p.dict_capacidades[p.dict_hospitales["Hospital_1"]][p.dict_unidades["OR"]],
+            p.dict_unidades["ICU"]: p.dict_capacidades[p.dict_hospitales["Hospital_1"]][p.dict_unidades["ICU"]],
+            p.dict_unidades["SDU/WARD"]: p.dict_capacidades[p.dict_hospitales["Hospital_1"]][p.dict_unidades["SDU/WARD"]]
+            },
+            p.dict_hospitales["Hospital_2"]: {
+            p.dict_unidades["OR"]: p.dict_capacidades[p.dict_hospitales["Hospital_2"]][p.dict_unidades["OR"]],
+            p.dict_unidades["ICU"]: p.dict_capacidades[p.dict_hospitales["Hospital_2"]][p.dict_unidades["ICU"]],
+            p.dict_unidades["SDU/WARD"]: p.dict_capacidades[p.dict_hospitales["Hospital_2"]][p.dict_unidades["SDU/WARD"]]
+            },
+            p.dict_hospitales["Hospital_3"]: {
+            p.dict_unidades["OR"]: p.dict_capacidades[p.dict_hospitales["Hospital_3"]][p.dict_unidades["OR"]],
+            p.dict_unidades["ICU"]: p.dict_capacidades[p.dict_hospitales["Hospital_3"]][p.dict_unidades["ICU"]],
+            p.dict_unidades["SDU/WARD"]: p.dict_capacidades[p.dict_hospitales["Hospital_3"]][p.dict_unidades["SDU/WARD"]]
+            }
+        }
+        
+        ######## Nuevo ########
+        demanda_interna_ciclo, _ = self.demandas_internas_por_ciclo()
+        demanda_ed_ciclo = self.demandas_ed_por_ciclo(self.ciclo)
+        # Descomentar lo siguiente si no queremos restringir camas en OR
+        demanda_ed_ciclo[1][1] = 0
+        demanda_ed_ciclo[2][1] = 0
+        demanda_ed_ciclo[3][1] = 0
+        estado_wl = {}
+        for requerimiento in [1, 2, 3]:
+            estado_wl[requerimiento] = {}
+            for grd in [5, 6, 7, 8]:
+                estado_wl[requerimiento][grd] = self.actual["WL_sub_deques"][requerimiento][grd].copy()
+        pacientes_aceptados_realmente = []
+        paciente_aceptados_sin_demanda = []
+        #########################
+
+        for hospital in camas_libres: # Ojo podria quedarse en un loop infinito
+            for unidad in camas_libres[hospital]:
+                ocupacion_unidad = len(self.actual[hospital][unidad])
+                capacidad_unidad = capacidades[hospital][unidad]
+                de_ed = demanda_ed_ciclo[hospital][unidad]
+                de_interno = demanda_interna_ciclo[hospital][unidad]
+                demanda_esperada = max(0, de_ed + de_interno)
+                camas_disponibles = capacidad_unidad - ocupacion_unidad - demanda_esperada # Esto es nuevo
+                if camas_disponibles < 0:
+                    camas_disponibles = 0
+                camas_libres[hospital][unidad] = camas_disponibles
+
+                # Parte que realiza los cambios reales pacientes_aceptados_realmente = []
+                contador = 0
+                for grd, requerimiento, _ in self.prioridad_sacado:
+                    if unidad == requerimiento and camas_disponibles > 0:
+                        while (len(self.actual["WL_sub_deques"][requerimiento][grd]) > 0
+                            and contador < camas_disponibles):
+                            paciente = self.actual["WL_sub_deques"][requerimiento][grd].popleft()
+                            pacientes_aceptados_realmente.append(paciente) # Nuevo
+                            self.actual[hospital][paciente.unidad_requerida].append(paciente)
+                            datos = {"hospital": hospital, "unidad": p.dict_unidades["GA"]}
+                            meter_a_ga_modo_dict.append({"paciente": paciente, "datos": datos})
+                            datos = {"hospital": hospital, "unidad": paciente.unidad_requerida}
+                            internar_modo_dict.append({"paciente": paciente, "datos": datos})
+                            contador += 1
+                
+                # Parte que hubiese realizado sin demanda esperada (no realiza cambios reales) paciente_aceptados_sin_demanda = []
+                camas_disponibles_sin_demanda = capacidad_unidad - ocupacion_unidad
+                contador = 0
+                for grd, requerimiento, _ in self.prioridad_sacado:
+                    if unidad == requerimiento and camas_disponibles_sin_demanda > 0:
+                        while (len(estado_wl[requerimiento][grd]) > 0
+                            and contador < camas_disponibles_sin_demanda):
+                            paciente = estado_wl[requerimiento][grd].popleft()
+                            paciente_aceptados_sin_demanda.append(paciente)
+                            contador += 1
+
+        # Se arman las listas de decisiones         
+        # Primero al GA
+        dict_temporal = {}
+        for dict_cambio in meter_a_ga_modo_dict:
+            dict_temporal[dict_cambio["paciente"]] = dict_cambio["datos"]
+        self.decisiones.append(dict_temporal)
+        
+        # Luego internar
+        dict_temporal = {}
+        for dict_cambio in internar_modo_dict:
+            dict_temporal[dict_cambio["paciente"]] = dict_cambio["datos"]
+        self.decisiones.append(dict_temporal)
+
+        # Luego de pasar por todos los hospitales y unidades, 
+        # analizamos que pacientes no fueron aceptados por existir demanda esperada
+        pacientes_rechazados = [p for p in paciente_aceptados_sin_demanda if p not in pacientes_aceptados_realmente]
+
+        for grd, requerimiento, _ in self.prioridad_sacado:
+            if len(pacientes_rechazados) > 0:
+                for paciente in pacientes_rechazados:
+                    if paciente.grd == grd and paciente.requerimiento_inicial == requerimiento:
+                        derivaciones_esperadas = round(self.ciclo * self.tasa_derivacion_deseada)
+                        if self.derivaciones_realizadas < derivaciones_esperadas:
+                            self.derivar_wl_directamente(paciente)
+                            break  # sal del bucle de pacientes
+                else:
+                    continue  # se ejecuta si no hubo break en el for interno
+                break  # sal del bucle de prioridad_sacado también
+    
+    def derivar_wl_directamente(self, paciente): # Revisar
+        datos_derivar = []
+        
+        costo_desvio = p.dict_costo_derivar_wl[paciente.grd][paciente.requerimiento_inicial]
+        if self.budget >= costo_desvio:
+            # Actualizo la cantidad derivada y el presupuesto
+            self.derivaciones_realizadas += 1
+            self.budget -= costo_desvio                
+            # Lo agrego a la lista de decisiones, 0 de hospital WL              
+            datos_traslado = {"hospital": 0, "unidad": p.dict_unidades["PS"]}
+            datos_derivar.append({"paciente": paciente, "datos": datos_traslado})
+            self.actual["WL_sub_deques"][paciente.requerimiento_inicial][paciente.grd].remove(paciente)  # Elimino al paciente de la WL
+
+            # Luego pasar al PS en decisiones
+            dict_temporal = {}
+            for dict_cambio in datos_derivar:
+                dict_temporal[dict_cambio["paciente"]] = dict_cambio["datos"]
+            self.decisiones.append(dict_temporal)
+    
+    def derivar_ed(self, pacientes_en_ed): # Parece funcionar
+        datos_derivar = []
+        # Ya ordenados por costo de espera mayor a menor, voy derivando a los mas caros
+        copia_pacientes_en_ed = pacientes_en_ed.copy()
+        for paciente in copia_pacientes_en_ed:
+            if self.budget >= paciente.costo_desvio():
+                self.budget -= paciente.costo_desvio()
+                #self.derivaciones_realizadas += 1 # Esto es nuevo
+                # Lo saco de la lista de pacientes en ED
+                pacientes_en_ed.remove(paciente)
+                self.actual[paciente.hospital_actual][paciente.unidad_actual].remove(paciente)
+                # Lo agrego a la lista de decisiones                
+                datos_traslado = {"hospital": paciente.hospital_actual, "unidad": p.dict_unidades["PS"]}
+                datos_derivar.append({"paciente": paciente, "datos": datos_traslado})
+
+        # Luego internar
+        dict_temporal = {}
+        for dict_cambio in datos_derivar:
+            dict_temporal[dict_cambio["paciente"]] = dict_cambio["datos"]
+        self.decisiones.append(dict_temporal)
+
+    def tomar_decisiones(self, simulacion):
+        # Reinicio las variables
+        self.decisiones = []
+        self.expulsados_wl_del_ciclo_actual = []
+        self.actual = self.actual_vacio.copy()
+        self.budget = p.budget
+
+        # Copio localmente las ocupaciones de cada hospital
+        self.cargar_ciclo(simulacion)
+
+        # Reviso si hay pacientes que estoy obligado a sacar de WL (no implementado todavia)
+        self.agregar_pacientes_obligatorio_a_ga() 
+
+        # Primero reviso si hay pacientes que deben ser dados de alta
+        self.dar_de_alta()
+
+        # Luego realizo los cambios internos de cada hospital
+        for id_hospital in (p.dict_hospitales["Hospital_1"], p.dict_hospitales["Hospital_2"], p.dict_hospitales["Hospital_3"]):
+            self.cambios_internos_hospital(id_hospital)
+        
+        # Luego realizo los traslados
+        pacientes_quedaron_en_ed = self.traslados()
+
+        # Luego reviso si hay pacientes en ED que deben ser derivados a PS
+        self.derivar_ed(pacientes_quedaron_en_ed)
+
+        # Luego reviso si hay pacientes en WL que deben ser derivados a PS
+        self.derivar_wl()
+
+        # Asegurar factibilidad
+        self.asegurar_factibilidad_ed_ga()
+
+        # Luego reviso si hay pacientes en WL que pueden ser atendidos
+        # Se empieza a hacer cuando colapsa el sistema
+        if self.wl_colapso and self.t_colapso == 0:
+            self.t_colapso = self.ciclo # Guardo el ciclo en el que colapso
+        
+        if self.wl_colapso and self.ciclo - self.t_colapso > 100:
+            self.atender_wl()
+            
+        self.ciclo += 1
+        return self.decisiones
+
+    ################################################################################################
+
 class Simulacion: # Revisado, funciona bien
 
     def __init__(self, T_max, seed, ciclos, modelo = Modelo(), modelo_alternativo = Modelo(), ciclo_de_cambio = 0, pacientes_caso_base = False, log_detallado = False):

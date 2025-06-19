@@ -3,7 +3,7 @@ import sys
 import os
 import time
 import json
-from clases import Simulacion, Paciente, ModeloA  # o el modelo que uses
+from clases import Simulacion, Paciente, ModeloA, ModeloProactivo  # o el modelo que uses
 from kpis import calcular_kpis
 
 if __name__ == "__main__":
@@ -13,7 +13,7 @@ if __name__ == "__main__":
     ciclo_de_cambio = 0
     pacientes_caso_base = False
     log_detallado = True
-    modelo_class = ModeloA
+    modelo_class = ModeloProactivo
     modelo_alternativo = None
 
     # Output folder
