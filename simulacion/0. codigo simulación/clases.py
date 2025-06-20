@@ -1278,6 +1278,7 @@ class ModeloProactivo(ModeloA):
         self.matrices, self.los_OR, self.los = self.cargar_datos_iniciales()
         self.tasa_derivacion_deseada = 2
         self.derivaciones_realizadas = 0
+        self.reduccion_capacidad_ga = 15
     
     ################# Todas estas son funciones nuevas para medir y estimar demanda ################
 
@@ -1744,6 +1745,82 @@ class ModeloProactivo(ModeloA):
         for dict_cambio in datos_derivar:
             dict_temporal[dict_cambio["paciente"]] = dict_cambio["datos"]
         self.decisiones.append(dict_temporal)
+
+    def derivar_wl(self): # Revisar
+        for id_hospital in (p.dict_hospitales["Hospital_1"], p.dict_hospitales["Hospital_2"], p.dict_hospitales["Hospital_3"]):
+            pacientes_en_ga = []
+            datos_derivar = []
+            datos_dejar_en_ga = []
+
+            for paciente in self.actual[id_hospital][p.dict_unidades["GA"]]:
+                # Esto solo para los nuevos que acabo de meter a GA, tnego que decidir si efectivamente los meto o si se derivan desde WL
+                # Se hace para evitar cambiar a pacientes que ya estaban en GA lo cual causa errores
+                if paciente in self.expulsados_wl_del_ciclo_actual:
+                    pacientes_en_ga.append(paciente)
+            pacientes_en_ga.sort(key=lambda x: p.dict_costo_derivar_wl[x.grd][x.requerimiento_inicial]) # menos caro a mas caro
+            extras_derivados = 0
+
+            # Ojo que se me mezclan los que ya estaban en GA con los que acabo de "meter" entre comillas
+            # Tengo que saber cuales son los del ciclo
+            # Ya ordenados por costo de derivar menor a mayor, voy derivando a los mas baratos
+            cantidad_en_ga = len(self.actual[id_hospital][p.dict_unidades["GA"]])
+            capacidad_en_ga = p.dict_capacidades[id_hospital][p.dict_unidades["GA"]] - self.reduccion_capacidad_ga # 5 es el margen de seguridad que se deja en GA
+            if cantidad_en_ga > capacidad_en_ga:
+                cantidad_a_derivar = cantidad_en_ga - capacidad_en_ga
+                # Solo derivo si son mas de la capacidad del GA
+                copia_pacientes_en_ga = pacientes_en_ga[:cantidad_a_derivar].copy()
+                for paciente in copia_pacientes_en_ga:
+                    costo_desvio = p.dict_costo_derivar_wl[paciente.grd][paciente.requerimiento_inicial]
+                    if self.budget >= costo_desvio:
+                        extras_derivados += 1
+                        self.budget -= costo_desvio
+                        # Lo saco de la lista de pacientes en GA (que en realidad nunca lo meti a GA, en teoria)
+                        pacientes_en_ga.remove(paciente)
+                        self.actual[paciente.hospital_actual][paciente.unidad_actual].remove(paciente)
+                        # Lo agrego a la lista de decisiones, 0 de hospital WL              
+                        datos_traslado = {"hospital": 0, "unidad": p.dict_unidades["PS"]}
+                        datos_derivar.append({"paciente": paciente, "datos": datos_traslado})
+                        # Ahora des hago lo trucho de antes y los vuelvo a su origen, nunca los meti a GA
+                        paciente.unidad_actual = p.dict_unidades["WL"]
+                        paciente.hospital_actual = 0
+
+                # Una vez que se hayan derivado todos los extras que no cabian en GA
+                if extras_derivados == cantidad_a_derivar:
+                    # Si ya no hay que derivar, devuelvo los pacientes que quedaron en GA a su estado original y aplico los cambios
+                    for paciente in pacientes_en_ga: # Los que efectivamente se quedan en GA
+                        datos_traslado = {"hospital": id_hospital, "unidad": p.dict_unidades["GA"]}
+                        datos_dejar_en_ga.append({"paciente": paciente, "datos": datos_traslado})
+                        # Ahora des hago lo trucho de antes y los vuelvo a su origen
+                        paciente.unidad_actual = p.dict_unidades["WL"]
+                        paciente.hospital_actual = 0
+
+                # Luego pasar al PS en decisiones
+                dict_temporal = {}
+                for dict_cambio in datos_derivar:
+                    dict_temporal[dict_cambio["paciente"]] = dict_cambio["datos"]
+                self.decisiones.append(dict_temporal)
+
+                # Luego pasar al GA en decisiones
+                dict_temporal = {}
+                for dict_cambio in datos_dejar_en_ga:
+                    dict_temporal[dict_cambio["paciente"]] = dict_cambio["datos"]
+                self.decisiones.append(dict_temporal)
+            
+            else: # Si no hay que derivar, devuelo los pacientes a su estado original y aplico los cambios
+                paciente_en_ga_copia = pacientes_en_ga.copy()
+                for paciente in paciente_en_ga_copia:
+                    datos_traslado = {"hospital": id_hospital, "unidad": p.dict_unidades["GA"]}
+                    datos_dejar_en_ga.append({"paciente": paciente, "datos": datos_traslado})
+                    # Ahora des hago lo trucho de antes y los vuelvo a su origen, nunca los meti a GA
+                    paciente.unidad_actual = p.dict_unidades["WL"]
+                    paciente.hospital_actual = 0
+                
+                # Luego pasar al GA en decisiones
+                dict_temporal = {}
+                for dict_cambio in datos_dejar_en_ga:
+                    dict_temporal[dict_cambio["paciente"]] = dict_cambio["datos"]
+                self.decisiones.append(dict_temporal)
+
 
     def tomar_decisiones(self, simulacion):
         # Reinicio las variables
