@@ -1276,7 +1276,7 @@ class ModeloProactivo(ModeloA):
         self.demanda_ed = demanda_ed
         self.demanda_wl = demanda_wl
         self.matrices, self.los_OR, self.los = self.cargar_datos_iniciales()
-        self.tasa_derivacion_deseada = 0.5
+        self.tasa_derivacion_deseada = 2
         self.derivaciones_realizadas = 0
     
     ################# Todas estas son funciones nuevas para medir y estimar demanda ################
@@ -1644,7 +1644,7 @@ class ModeloProactivo(ModeloA):
                 if unidad == p.dict_unidades["OR"]:
                     de_ed = 0
                 de_interno = demanda_interna_ciclo[hospital][unidad]
-                demanda_esperada = max(0, de_ed + de_interno) # Sin round
+                demanda_esperada = max(0, round(de_ed + de_interno)) # Con round
                 camas_disponibles = capacidad_unidad - ocupacion_unidad - demanda_esperada # Esto es nuevo
                 if camas_disponibles < 0:
                     camas_disponibles = 0
