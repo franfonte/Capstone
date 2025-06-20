@@ -3,7 +3,7 @@ import sys
 import time
 import json
 import parametros as p
-from clases import Simulacion, Paciente, ModeloA  # o el modelo que uses
+from clases import Simulacion, Paciente, ModeloProactivo  # o el modelo que uses
 from kpis import calcular_kpis
 
 if __name__ == "__main__":
@@ -17,15 +17,15 @@ if __name__ == "__main__":
     ciclo_de_cambio = 0
     pacientes_caso_base = False
     log_detallado = True
-    modelo_class = ModeloA
+    modelo_class = ModeloProactivo
     modelo_alternativo = None
 
     # Construir nombre de carpeta con cambio
     nombre_base = modelo_class.__name__
     nombre_alternativo = modelo_alternativo.__name__ if modelo_alternativo else "None"
-    sufijo = f"_H{hospital_id}_{unidad_nombre}_{'+' if delta >= 0 else ''}{delta}".replace("/", "_")
-    nombre_carpeta = f"{nombre_base}_{nombre_alternativo}_T{T_max}_C{ciclos}{sufijo}"
-    carpeta_base = os.path.join("resultados sensibilidad", nombre_carpeta)
+    nombre_carpeta = f"{nombre_base}_T{T_max}_C{ciclos}_H{hospital_id}_{unidad_nombre}".replace("/", "_")
+    nombre_sub_carpeta = f"{'+' if delta >= 0 else ''}{delta}"
+    carpeta_base = os.path.join("resultados sensibilidad", nombre_carpeta, nombre_sub_carpeta)
     carpeta_logs = os.path.join(carpeta_base, "logs")
     carpeta_plots = os.path.join(carpeta_base, "plots")
     carpeta_kpis = os.path.join(carpeta_base, "kpis")

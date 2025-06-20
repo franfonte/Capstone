@@ -176,6 +176,7 @@ cython_debug/
 # Archivos pesados
 .DS_Store
 *.json
+*.png
 simulacion/0. codigo simulación/resultados sensibilidad/
 # simulacion/0. codigo simulación/resultados incertidumbre/incertidumbre_simulada.json
 # simulacion/1. codigo analisis/resultados incertidumbre

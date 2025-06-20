@@ -3,7 +3,7 @@ import sys
 import os
 import time
 import json
-from clases import Simulacion, Paciente, ModeloA, ModeloProactivo  # o el modelo que uses
+from clases import Simulacion, Paciente, ModeloA, ModeloProactivo, ModeloBase  # o el modelo que uses
 from kpis import calcular_kpis
 
 if __name__ == "__main__":

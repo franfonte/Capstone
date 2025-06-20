@@ -4,8 +4,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import parametros as p
 import os
-from scipy.stats import mode
+from scipy.stats import mode, t, norm
 import time
+import json
 
 """
 KPIs:
@@ -620,3 +621,88 @@ def generar_cake_plots(distribucion, seccion="entradas", por_grd=True, por_reque
                 plt.title(f"{seccion.capitalize()} - {hospital} (Distribución por requerimiento)")
                 plt.axis('equal')
                 plt.show()
+
+def calcular_kpis_promedio_con_ic_en_formato_json(directorio, nivel_confianza=95, guardar_en=None):
+    """
+    Calcula el promedio ± IC de todos los KPIs numéricos en archivos JSON de un directorio.
+    Usa t-Student si n < 100, o normal estándar (z) si n >= 100.
+
+    Args:
+        directorio (str): Ruta a carpeta con archivos JSON.
+        nivel_confianza (int or float): Nivel de confianza deseado (ej. 90, 95, 99).
+        guardar_en (str or None): Ruta para guardar el resultado en un JSON (opcional).
+
+    Returns:
+        dict: Diccionario anidado con 'media ± error' y metadata de cálculo.
+    """
+    if not (50 <= nivel_confianza < 100):
+        raise ValueError("El nivel de confianza debe estar entre 50 y 99.9")
+
+    prob = nivel_confianza / 100
+    json_files = [os.path.join(directorio, f) for f in os.listdir(directorio) if f.endswith(".json")]
+    n = len(json_files)
+    if n == 0:
+        raise ValueError("No se encontraron archivos JSON en el directorio.")
+
+    # Usar el primer archivo como referencia de estructura
+    with open(json_files[0], "r") as f:
+        ejemplo = json.load(f)
+
+    def extraer_rutas(d, prefijo=""):
+        rutas = []
+        for k, v in d.items():
+            ruta = f"{prefijo}.{k}" if prefijo else k
+            if isinstance(v, dict):
+                rutas += extraer_rutas(v, ruta)
+            elif isinstance(v, (int, float)):
+                rutas.append(ruta)
+        return rutas
+
+    kpis_ruta = extraer_rutas(ejemplo)
+
+    # Recolectar valores de cada KPI
+    data = {kpi: [] for kpi in kpis_ruta}
+    for file in json_files:
+        with open(file, "r") as f:
+            contenido = json.load(f)
+            for kpi in kpis_ruta:
+                try:
+                    val = contenido
+                    for key in kpi.split("."):
+                        val = val[key]
+                    if isinstance(val, (int, float)):
+                        data[kpi].append(val)
+                except (KeyError, TypeError):
+                    continue
+
+    resumen = {"_info": {"n": n, "nivel_confianza": f"{nivel_confianza}%", "distribucion": ""}}
+
+    if n > 100:
+        z_val = norm.ppf((1 + prob) / 2)
+        resumen["_info"]["distribucion"] = "normal"
+    else:
+        resumen["_info"]["distribucion"] = "t_student"
+
+    for kpi, valores in data.items():
+        arr = np.array(valores)
+        mean = np.mean(arr)
+        std = np.std(arr, ddof=1)
+        sem = std / np.sqrt(n)
+        if n > 100:
+            error = z_val * sem
+        else:
+            t_val = t.ppf((1 + prob) / 2, df=n - 1)
+            error = t_val * sem
+        valor_str = f"{round(mean, 2)} ± {round(error, 2)}"
+
+        puntero = resumen
+        keys = kpi.split(".")
+        for key in keys[:-1]:
+            puntero = puntero.setdefault(key, {})
+        puntero[keys[-1]] = valor_str
+
+    if guardar_en:
+        with open(guardar_en, "w") as f:
+            json.dump(resumen, f, indent=4)
+
+    return resumen

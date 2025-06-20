@@ -1626,11 +1626,6 @@ class ModeloProactivo(ModeloA):
         
         ######## Nuevo ########
         demanda_interna_ciclo, _ = self.demandas_internas_por_ciclo()
-        demanda_ed_ciclo = self.demandas_ed_por_ciclo(self.ciclo)
-        # Descomentar lo siguiente si no queremos restringir camas en OR
-        demanda_ed_ciclo[1][1] = 0
-        demanda_ed_ciclo[2][1] = 0
-        demanda_ed_ciclo[3][1] = 0
         estado_wl = {}
         for requerimiento in [1, 2, 3]:
             estado_wl[requerimiento] = {}
@@ -1644,9 +1639,12 @@ class ModeloProactivo(ModeloA):
             for unidad in camas_libres[hospital]:
                 ocupacion_unidad = len(self.actual[hospital][unidad])
                 capacidad_unidad = capacidades[hospital][unidad]
-                de_ed = demanda_ed_ciclo[hospital][unidad]
+                de_ed = self.demanda_ed[hospital][unidad]["total_esperado"]
+                # Nunca estimar demanda en OR, es caotico
+                if unidad == p.dict_unidades["OR"]:
+                    de_ed = 0
                 de_interno = demanda_interna_ciclo[hospital][unidad]
-                demanda_esperada = max(0, de_ed + de_interno)
+                demanda_esperada = max(0, de_ed + de_interno) # Sin round
                 camas_disponibles = capacidad_unidad - ocupacion_unidad - demanda_esperada # Esto es nuevo
                 if camas_disponibles < 0:
                     camas_disponibles = 0
