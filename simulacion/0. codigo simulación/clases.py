@@ -1851,7 +1851,7 @@ class Simulacion: # Revisado, funciona bien
             with open(f"resultados incertidumbre/{self.file_name}", "r") as file:
                 incertidumbre_keys_str = json.load(file)
         else:
-            with open("resultados incertidumbre/incertidumbre_base.json", "r") as file:
+            with open("resultados incertidumbre/0_4208_Pacientes_Base.json", "r") as file:
                 incertidumbre_keys_str = json.load(file)
 
         for hospital in range(0,4): # 0 son llegadas a WL

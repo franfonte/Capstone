@@ -19,7 +19,8 @@ if __name__ == "__main__":
     # Output folder
     nombre_base = modelo_class.__name__
     nombre_alternativo = modelo_alternativo.__name__ if modelo_alternativo else "None"
-    carpeta_base = f"resultados simulacion/{nombre_base}_{nombre_alternativo}_T{T_max}_C{ciclos}"
+    # carpeta_base = f"resultados simulacion/{nombre_base}_{nombre_alternativo}_T{T_max}_C{ciclos}"
+    carpeta_base = f"resultados simulacion/{nombre_base}_T{T_max}_C{ciclos}"
     carpeta_logs = os.path.join(carpeta_base, "logs")
     carpeta_plots = os.path.join(carpeta_base, "plots")
     carpeta_kpis = os.path.join(carpeta_base, "kpis")
