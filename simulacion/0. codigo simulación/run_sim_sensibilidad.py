@@ -61,14 +61,14 @@ if __name__ == "__main__":
     df = simu.simular()
 
     # Guardar CSV
-    nombre_csv = f"{seed}.csv"
-    df.to_csv(os.path.join(carpeta_logs, nombre_csv), index=False)
+    # nombre_csv = f"{seed}.csv"
+    # df.to_csv(os.path.join(carpeta_logs, nombre_csv), index=False) # Dejo de guardarlos, generaba demasiado archivo
 
     # Calcular KPIs
     t0 = time.time()
     kpis = calcular_kpis(
         df,
-        save_plot=True,
+        save_plot=False, # No guardo ni muestros los graficos porque son miles
         modelo=modelo,
         seed=seed,
         ciclos=ciclos,
