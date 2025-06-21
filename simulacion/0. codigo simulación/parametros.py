@@ -2,7 +2,7 @@
 
 # datos: tasa de descuento para valor presente y budget diario para derivaciones y traslados
 tasa_descuento = 0.99
-budget = 150000
+budget = 15000
 
 # nombre_hospitales: nombre de los hospitales
 dict_hospitales = {
