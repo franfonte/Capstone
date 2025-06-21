@@ -1097,12 +1097,12 @@ class Modelo:
                 self.derivar_ed(pacientes_en_ed)
                 print("Se quiebra el stock debido a ED, se derivan pacientes a WL")
             if ga_colapsado:
-                h_1 = len(self.actual[1][p.dict_unidades["GA"]])
-                h_2 = len(self.actual[2][p.dict_unidades["GA"]])
-                h_3 = len(self.actual[3][p.dict_unidades["GA"]])
-                if h_1 + h_2 + h_3 > 30:
-                    self.quiebres_stock += 1
-                print(f"GA quiebra stock {budget_restante}, h1: {h_1}, h2: {h_2}, h3: {h_3}, quiebres_reales: {self.quiebres_stock}")
+                # h_1 = len(self.actual[1][p.dict_unidades["GA"]])
+                # h_2 = len(self.actual[2][p.dict_unidades["GA"]])
+                # h_3 = len(self.actual[3][p.dict_unidades["GA"]])
+                # if h_1 + h_2 + h_3 > 30:
+                #     self.quiebres_stock += 1
+                # print(f"GA quiebra stock {budget_restante}, h1: {h_1}, h2: {h_2}, h3: {h_3}, quiebres_reales: {self.quiebres_stock}")
                 self.derivar_wl()
 
     def atender_wl(self): # Completar
@@ -1289,8 +1289,8 @@ class ModeloProactivo(ModeloA):
         # Atributo regular ocupación GA
         self.reduccion_capacidad_ga = 0
         # Atributos para derivacion WL agresiva
-        self.budget_maximo_agresivo = 1/3 * p.budget
-        self.ocupacion_wl_deseada = [50, False]
+        self.budget_maximo_agresivo = 1/2 * p.budget
+        self.ocupacion_wl_deseada = [150, False]
         self.capacidad_maxima_wl = 1000
         self.ocupacion_wl_actual = 0
         # Atributos derivaciones proactivas
@@ -1301,8 +1301,8 @@ class ModeloProactivo(ModeloA):
         self.salidas_sdu_ward_ciclo_pasado = 0
         self.margen_proactivo = 0 # Cantidad extra a derivar para asegurarse de que la WL no colapse
         self.promedio_entradas_menos_salidas = 0
-        self.ciclo_promedio_actual = 0
-        self.reinicio_promedio = 730 # 1 año de ciclos, para reiniciar el promedio de entradas menos salidas
+        self.reinicio_promedio = 750 # 1 año en ciclos, para reiniciar el promedio de entradas menos salidas
+        self.ventana_entradas_menos_salidas = deque(maxlen=self.reinicio_promedio)  # tamaño fijo
     
     ################# Todas estas son funciones nuevas para medir y estimar demanda ################
 
@@ -1940,16 +1940,20 @@ class ModeloProactivo(ModeloA):
 
     def derivaciones_proactivas(self):
         entrada_menos_salidas = self.entradas_wl_ciclo + self.entradas_ed_ciclo - self.salidas_sdu_ward_ciclo_pasado
-        self.promedio_entradas_menos_salidas = (self.promedio_entradas_menos_salidas * self.ciclo_promedio_actual + entrada_menos_salidas) / (self.ciclo_promedio_actual + 1)
-        self.ciclo_promedio_actual += 1
+        self.ventana_entradas_menos_salidas.append(entrada_menos_salidas)
 
-        self.derivar_ciclo_actual = max(0,self.promedio_entradas_menos_salidas + self.margen_proactivo)
-        # self.derivar_ciclo_actual = max(0, entrada_menos_salidas)
-        if self.ciclo%250 == 0:
-            print(f"Ciclo {self.ciclo}, derivaciones proactivas: {self.derivar_ciclo_actual}, entraron wl: {self.entradas_wl_ciclo}, entraron ed: {self.entradas_ed_ciclo}, salieron sdu/ward: {self.salidas_sdu_ward_ciclo_pasado}")
+        # Calcular promedio móvil
+        self.promedio_entradas_menos_salidas = sum(self.ventana_entradas_menos_salidas) / len(self.ventana_entradas_menos_salidas)
+        self.derivar_ciclo_actual = max(0, self.promedio_entradas_menos_salidas + self.margen_proactivo)
+
+        # if self.ciclo % 250 == 0:
+        #     print(f"Ciclo {self.ciclo}, derivaciones proactivas: {self.derivar_ciclo_actual:.2f}, "
+        #         f"entraron wl: {self.entradas_wl_ciclo}, entraron ed: {self.entradas_ed_ciclo}, "
+        #         f"salieron sdu/ward: {self.salidas_sdu_ward_ciclo_pasado}")
+
         derivaciones_realizadas = 0
-        for grd, requerimiento, _ in self.prioridad_sacado: # (grd, requerimiento, costo_espera)
-            lista_temporal = self.actual["WL_sub_deques"][requerimiento][grd].copy() # Copio la lista de pacientes en WL
+        for grd, requerimiento, _ in self.prioridad_sacado:
+            lista_temporal = self.actual["WL_sub_deques"][requerimiento][grd].copy()
             for paciente in lista_temporal:
                 costo_desvio = p.dict_costo_derivar_wl[paciente.grd][paciente.requerimiento_inicial]
                 if self.budget >= costo_desvio and derivaciones_realizadas < self.derivar_ciclo_actual:
@@ -1958,9 +1962,6 @@ class ModeloProactivo(ModeloA):
                     derivaciones_realizadas += 1
                 else:
                     break
-
-        if self.ciclo_promedio_actual >= self.reinicio_promedio:
-            self.ciclo_promedio_actual = 0
 
     def tomar_decisiones(self, simulacion):
         # Reinicio las variables
@@ -2000,7 +2001,7 @@ class ModeloProactivo(ModeloA):
             self.t_colapso = self.ciclo # Guardo el ciclo en el que colapso
         
         # Espero a que colapse para asemejarse a caso base
-        if self.wl_colapso and self.ciclo - self.t_colapso > 100:
+        if self.wl_colapso and self.ciclo - self.t_colapso > 200:
             self.atender_wl()
         
             # Si la WL sigue colapsada, reviso si puedo derivar agresivamente (solo al incio)
@@ -2381,8 +2382,8 @@ class Simulacion: # Revisado, funciona bien
 
         # Bucle principal de simulación
         while self.T <= self.T_max:
-            if self.T % 1000 == 0:
-                print(f"\nSimulando ciclo {self.T} de {self.T_max}")
+            # if self.T == 4208:
+            #     print(f"\nSimulando ciclo {self.T} de {self.T_max}")
             
             # Esto solo ocurre cuando quiero cambiar de modelo entremedio de la simulacion T!= 0
             if self.T == self.ciclo_de_cambio:
