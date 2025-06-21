@@ -1279,17 +1279,30 @@ class ModeloProactivo(ModeloA):
     """Modelo que implementa una estrategia proactiva para manejar el flujo de pacientes en el hospital."""
     def __init__(self):
         super().__init__()
+        # Atributos para demanda esperada
         demanda_ed, demanda_wl = self.generar_demanda_ed_wl()
         self.demanda_ed = demanda_ed
         self.demanda_wl = demanda_wl
         self.matrices, self.los_OR, self.los = self.cargar_datos_iniciales()
         self.tasa_derivacion_deseada = 2
         self.derivaciones_realizadas = 0
+        # Atributo regular ocupación GA
         self.reduccion_capacidad_ga = 0
+        # Atributos para derivacion WL agresiva
         self.budget_maximo_agresivo = 1/3 * p.budget
-        self.ocupacion_wl_deseada = [25, False]
+        self.ocupacion_wl_deseada = [50, False]
         self.capacidad_maxima_wl = 1000
         self.ocupacion_wl_actual = 0
+        # Atributos derivaciones proactivas
+        self.derivar_proactivamente = True
+        self.entradas_wl_ciclo = 0
+        self.entradas_ed_ciclo = 0
+        self.salidas_sdu_ward_ciclo_actual = 0
+        self.salidas_sdu_ward_ciclo_pasado = 0
+        self.margen_proactivo = 0 # Cantidad extra a derivar para asegurarse de que la WL no colapse
+        self.promedio_entradas_menos_salidas = 0
+        self.ciclo_promedio_actual = 0
+        self.reinicio_promedio = 730 # 1 año de ciclos, para reiniciar el promedio de entradas menos salidas
     
     ################# Todas estas son funciones nuevas para medir y estimar demanda ################
 
@@ -1635,6 +1648,43 @@ class ModeloProactivo(ModeloA):
                 for unidad_id, unidad in hospital.unidades.items():
                     self.actual[id_hospital][unidad_id] = unidad.pacientes.copy() # Evito que se modifique la lista original
 
+        self.entradas_wl_ciclo = 0 # Reinicio contador de entradas a WL
+        self.entradas_ed_ciclo = 0 # Reinicio contador de entradas a ED
+        # Contar a todos los nuevos que llegaron en este ciclo para wl y para ed
+        for grd, requerimiento, _ in self.prioridad_sacado:
+            for paciente in simulacion.wl.sub_listas[requerimiento][grd]:
+                if paciente.ti_inicial == self.ciclo:
+                    self.entradas_wl_ciclo += 1
+        # Contar a todos los nuevos que llegaron en este ciclo para ed
+        for id_hospital, hospital in simulacion.hospitales.items():
+            if id_hospital != 0: # No considero WL
+                for unidad_id, unidad in hospital.unidades.items():
+                    if unidad_id == p.dict_unidades["ED"]:
+                        for paciente in unidad.pacientes:
+                            if paciente.ti_inicial == self.ciclo:
+                                self.entradas_ed_ciclo += 1
+
+    def dar_de_alta(self):
+        self.salidas_sdu_ward_ciclo_pasado = self.salidas_sdu_ward_ciclo_actual # Guardar salidas del ciclo pasado
+        self.salidas_sdu_ward_ciclo_actual = 0
+        for id_hospital in (p.dict_hospitales["Hospital_1"], p.dict_hospitales["Hospital_2"], p.dict_hospitales["Hospital_3"]):
+            # Primero reviso que pacientes terminan su evolucion en el SDU_WARD
+            pacientes_de_alta = [] # Revisar
+
+            # Cuidado, estaba modificando una lista sobre la que estoy iterando
+            lista_copia = self.actual[id_hospital][p.dict_unidades["SDU/WARD"]].copy()
+            for paciente in lista_copia:
+                if paciente.unidad_requerida == p.dict_unidades["END"]:
+                    pacientes_de_alta.append(paciente)
+                    self.actual[id_hospital][p.dict_unidades["SDU/WARD"]].remove(paciente)
+            
+            self.salidas_sdu_ward_ciclo_actual += len(pacientes_de_alta) # Contar los que salieron del SDU/WARD
+
+            dict_temporal = {}
+            for paciente in pacientes_de_alta:
+                dict_temporal[paciente] = {"hospital": paciente.hospital_actual, "unidad": paciente.unidad_requerida}
+            self.decisiones.append(dict_temporal)
+
     def atender_wl(self):
         # Meter al GA
         meter_a_ga_modo_dict = []
@@ -1877,7 +1927,7 @@ class ModeloProactivo(ModeloA):
                 self.decisiones.append(dict_temporal)
 
     def derivar_wl_agresivamente(self):
-        budget_tentativo = max(self.budget, self.budget_maximo_agresivo)
+        budget_tentativo = min(self.budget, self.budget_maximo_agresivo)
         for grd, requerimiento, _ in self.prioridad_sacado: # (grd, requerimiento, costo_espera)
             lista_temporal = self.actual["WL_sub_deques"][requerimiento][grd].copy() # Copio la lista de pacientes en WL
             for paciente in lista_temporal:
@@ -1887,7 +1937,31 @@ class ModeloProactivo(ModeloA):
                     self.derivar_wl_directamente(paciente)
                 else:
                     break
-                
+
+    def derivaciones_proactivas(self):
+        entrada_menos_salidas = self.entradas_wl_ciclo + self.entradas_ed_ciclo - self.salidas_sdu_ward_ciclo_pasado
+        self.promedio_entradas_menos_salidas = (self.promedio_entradas_menos_salidas * self.ciclo_promedio_actual + entrada_menos_salidas) / (self.ciclo_promedio_actual + 1)
+        self.ciclo_promedio_actual += 1
+
+        self.derivar_ciclo_actual = max(0,self.promedio_entradas_menos_salidas + self.margen_proactivo)
+        # self.derivar_ciclo_actual = max(0, entrada_menos_salidas)
+        if self.ciclo%250 == 0:
+            print(f"Ciclo {self.ciclo}, derivaciones proactivas: {self.derivar_ciclo_actual}, entraron wl: {self.entradas_wl_ciclo}, entraron ed: {self.entradas_ed_ciclo}, salieron sdu/ward: {self.salidas_sdu_ward_ciclo_pasado}")
+        derivaciones_realizadas = 0
+        for grd, requerimiento, _ in self.prioridad_sacado: # (grd, requerimiento, costo_espera)
+            lista_temporal = self.actual["WL_sub_deques"][requerimiento][grd].copy() # Copio la lista de pacientes en WL
+            for paciente in lista_temporal:
+                costo_desvio = p.dict_costo_derivar_wl[paciente.grd][paciente.requerimiento_inicial]
+                if self.budget >= costo_desvio and derivaciones_realizadas < self.derivar_ciclo_actual:
+                    self.budget -= costo_desvio
+                    self.derivar_wl_directamente(paciente)
+                    derivaciones_realizadas += 1
+                else:
+                    break
+
+        if self.ciclo_promedio_actual >= self.reinicio_promedio:
+            self.ciclo_promedio_actual = 0
+
     def tomar_decisiones(self, simulacion):
         # Reinicio las variables
         self.decisiones = []
@@ -1937,6 +2011,11 @@ class ModeloProactivo(ModeloA):
                     self.capacidad_maxima_wl = self.ocupacion_wl_deseada[0]
                     self.ocupacion_wl_deseada[1] = True
                     self.derivaciones_realizadas = 0
+                    print()
+            
+            # Las derivaciones proactivas empiezan luego de que WL se estabiliza
+            if self.ocupacion_wl_deseada[1] and self.derivar_proactivamente:
+                self.derivaciones_proactivas()
             
         self.ciclo += 1
         return self.decisiones
