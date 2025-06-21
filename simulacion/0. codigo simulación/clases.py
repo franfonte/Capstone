@@ -592,6 +592,7 @@ class Modelo:
         self.prioridad_sacado = self.prioridad_sacado_wl()
         self.expulsados_wl_del_ciclo_actual = []
         self.wl_colapso = False
+        self.quiebres_stock = 0
         self.ciclo = 1
 
     def prioridad_sacado_wl(self): # Revisado, funciona bien
@@ -1096,7 +1097,12 @@ class Modelo:
                 self.derivar_ed(pacientes_en_ed)
                 print("Se quiebra el stock debido a ED, se derivan pacientes a WL")
             if ga_colapsado:
-                print(f"GA quiebra stock {budget_restante}, h1: {len(self.actual[1][4])}, h2: {len(self.actual[2][4])}, h3: {len(self.actual[3][4])}")
+                h_1 = len(self.actual[1][p.dict_unidades["GA"]])
+                h_2 = len(self.actual[2][p.dict_unidades["GA"]])
+                h_3 = len(self.actual[3][p.dict_unidades["GA"]])
+                if h_1 + h_2 + h_3 > 30:
+                    self.quiebres_stock += 1
+                print(f"GA quiebra stock {budget_restante}, h1: {h_1}, h2: {h_2}, h3: {h_3}, quiebres_reales: {self.quiebres_stock}")
                 self.derivar_wl()
 
     def atender_wl(self): # Completar
@@ -1280,9 +1286,10 @@ class ModeloProactivo(ModeloA):
         self.tasa_derivacion_deseada = 2
         self.derivaciones_realizadas = 0
         self.reduccion_capacidad_ga = 0
-        # self.ocupacion_wl_deseada = [25, False]
-        # self.capacidad_maxima_wl = 1000
-        # self.ocupacion_wl_actual = 0
+        self.budget_maximo_agresivo = 1/3 * p.budget
+        self.ocupacion_wl_deseada = [25, False]
+        self.capacidad_maxima_wl = 1000
+        self.ocupacion_wl_actual = 0
     
     ################# Todas estas son funciones nuevas para medir y estimar demanda ################
 
@@ -1583,50 +1590,50 @@ class ModeloProactivo(ModeloA):
     ################################################################################################
 
     ############ Estas funciones originales se cambiaron para que el modelo sea proactivo ##########
-    # def cargar_ciclo(self, simulacion): # Revisar
-    #     # Recorro prioridad sacado ya que en ese orden minimizo el costo social
-    #     # Revisar si WL esta colapsada, agregarlos a self.actual["WL"]
-    #     ocupacion_wl = 0
-    #     for grd, requerimiento, _ in self.prioridad_sacado: # (grd, requerimiento, costo_espera)
-    #         self.actual["WL_sub_deques"][requerimiento][grd] = simulacion.wl.sub_listas[requerimiento][grd].copy() # Evito que se modifique la lista original
-    #         ocupacion_wl += len(simulacion.wl.sub_listas[requerimiento][grd])
+    def cargar_ciclo(self, simulacion): # Se modifico para que registre la ocupacion de wl y regule su limite
+        # Recorro prioridad sacado ya que en ese orden minimizo el costo social
+        # Revisar si WL esta colapsada, agregarlos a self.actual["WL"]
+        ocupacion_wl = 0
+        for grd, requerimiento, _ in self.prioridad_sacado: # (grd, requerimiento, costo_espera)
+            self.actual["WL_sub_deques"][requerimiento][grd] = simulacion.wl.sub_listas[requerimiento][grd].copy() # Evito que se modifique la lista original
+            ocupacion_wl += len(simulacion.wl.sub_listas[requerimiento][grd])
 
-    #     self.ocupacion_wl_actual = ocupacion_wl
-    #     # Revisar los que alcanzan los 400 ciclos, agregarlos a self.actual["WL"]
-    #     for grd, requerimiento, _ in self.prioridad_sacado:
-    #         copia_subdeque = self.actual["WL_sub_deques"][requerimiento][grd].copy()
-    #         for paciente in copia_subdeque:
-    #                 ti_evento = paciente.ti_evento_actual
-    #                 tiempo_actual = paciente.tiempo_actual
-    #                 los_wl = tiempo_actual - ti_evento
-    #                 if los_wl == 400:
-    #                     # Agrego el paciente a la lista de WL que debo tratar si o si
-    #                     self.actual["WL_sub_deques"][requerimiento][grd].remove(paciente) # Se me habia olvidado removerlos (causaba pequeño error)
-    #                     self.actual["WL"].append(paciente)
+        self.ocupacion_wl_actual = ocupacion_wl # nuevo
+        # Revisar los que alcanzan los 400 ciclos, agregarlos a self.actual["WL"]
+        for grd, requerimiento, _ in self.prioridad_sacado:
+            copia_subdeque = self.actual["WL_sub_deques"][requerimiento][grd].copy()
+            for paciente in copia_subdeque:
+                    ti_evento = paciente.ti_evento_actual
+                    tiempo_actual = paciente.tiempo_actual
+                    los_wl = tiempo_actual - ti_evento
+                    if los_wl == 400:
+                        # Agrego el paciente a la lista de WL que debo tratar si o si
+                        self.actual["WL_sub_deques"][requerimiento][grd].remove(paciente) # Se me habia olvidado removerlos (causaba pequeño error)
+                        self.actual["WL"].append(paciente)
         
-    #     # Reviso si la WL sobrepaso su capacidad maxima de 1000
-    #     sobran = ocupacion_wl - self.capacidad_maxima_wl
-    #     if sobran > 0:
-    #         self.wl_colapso = True
-    #         for grd, requerimiento, _ in self.prioridad_sacado:
-    #             if sobran > 0:
-    #                 cantidad_en_sublista = len(self.actual["WL_sub_deques"][requerimiento][grd])
-    #                 if sobran <= cantidad_en_sublista:
-    #                     sacar = sobran
-    #                 elif sobran > cantidad_en_sublista:
-    #                     sacar = cantidad_en_sublista
-    #                 for i in range(sacar):
-    #                     # Orden FIFO, el primero en entrar es el primero en salir
-    #                     self.actual["WL"].append(self.actual["WL_sub_deques"][requerimiento][grd].popleft())
-    #                 sobran -= sacar
+        # Reviso si la WL sobrepaso su capacidad maxima de 1000
+        sobran = ocupacion_wl - self.capacidad_maxima_wl
+        if sobran > 0:
+            self.wl_colapso = True
+            for grd, requerimiento, _ in self.prioridad_sacado:
+                if sobran > 0:
+                    cantidad_en_sublista = len(self.actual["WL_sub_deques"][requerimiento][grd])
+                    if sobran <= cantidad_en_sublista:
+                        sacar = sobran
+                    elif sobran > cantidad_en_sublista:
+                        sacar = cantidad_en_sublista
+                    for i in range(sacar):
+                        # Orden FIFO, el primero en entrar es el primero en salir
+                        self.actual["WL"].append(self.actual["WL_sub_deques"][requerimiento][grd].popleft())
+                    sobran -= sacar
         
-    #     self.expulsados_wl_del_ciclo_actual = self.actual["WL"].copy() # Guardo los que salieron de WL en el ciclo (para no mezclar lo en GA vs los "en GA talvez")
+        self.expulsados_wl_del_ciclo_actual = self.actual["WL"].copy() # Guardo los que salieron de WL en el ciclo (para no mezclar lo en GA vs los "en GA talvez")
 
-    #     # Relleno localmente las unidades de cada hospital con los pacientes que hay en ese momento
-    #     for id_hospital, hospital in simulacion.hospitales.items():
-    #         if id_hospital != 0: # No considero WL
-    #             for unidad_id, unidad in hospital.unidades.items():
-    #                 self.actual[id_hospital][unidad_id] = unidad.pacientes.copy() # Evito que se modifique la lista original
+        # Relleno localmente las unidades de cada hospital con los pacientes que hay en ese momento
+        for id_hospital, hospital in simulacion.hospitales.items():
+            if id_hospital != 0: # No considero WL
+                for unidad_id, unidad in hospital.unidades.items():
+                    self.actual[id_hospital][unidad_id] = unidad.pacientes.copy() # Evito que se modifique la lista original
 
     def atender_wl(self):
         # Meter al GA
@@ -1757,7 +1764,6 @@ class ModeloProactivo(ModeloA):
     
     def derivar_wl_directamente(self, paciente): # Revisar
         datos_derivar = []
-        
         costo_desvio = p.dict_costo_derivar_wl[paciente.grd][paciente.requerimiento_inicial]
         if self.budget >= costo_desvio:
             # Actualizo la cantidad derivada y el presupuesto
@@ -1870,20 +1876,18 @@ class ModeloProactivo(ModeloA):
                     dict_temporal[dict_cambio["paciente"]] = dict_cambio["datos"]
                 self.decisiones.append(dict_temporal)
 
-    # def derivar_wl_agresivamente(self):
-    #     budget_tentativo = self.budget
-    #     pacientes_a_derivar = []
-    #     for grd, requerimiento, _ in self.prioridad_sacado: # (grd, requerimiento, costo_espera)
-    #         lista_temporal = self.actual["WL_sub_deques"][requerimiento][grd].copy() # Copio la lista de pacientes en WL
-    #         for paciente in lista_temporal:
-    #             costo_desvio = p.dict_costo_derivar_wl[paciente.grd][paciente.requerimiento_inicial]
-    #             if budget_tentativo >= costo_desvio:
-    #                 budget_tentativo -= costo_desvio
-    #                 self.derivar_wl_directamente(paciente)
-    #             else:
-    #                 break
+    def derivar_wl_agresivamente(self):
+        budget_tentativo = max(self.budget, self.budget_maximo_agresivo)
+        for grd, requerimiento, _ in self.prioridad_sacado: # (grd, requerimiento, costo_espera)
+            lista_temporal = self.actual["WL_sub_deques"][requerimiento][grd].copy() # Copio la lista de pacientes en WL
+            for paciente in lista_temporal:
+                costo_desvio = p.dict_costo_derivar_wl[paciente.grd][paciente.requerimiento_inicial]
+                if budget_tentativo >= costo_desvio:
+                    budget_tentativo -= costo_desvio
+                    self.derivar_wl_directamente(paciente)
+                else:
+                    break
                 
-
     def tomar_decisiones(self, simulacion):
         # Reinicio las variables
         self.decisiones = []
@@ -1921,20 +1925,19 @@ class ModeloProactivo(ModeloA):
         if self.wl_colapso and self.t_colapso == 0:
             self.t_colapso = self.ciclo # Guardo el ciclo en el que colapso
         
+        # Espero a que colapse para asemejarse a caso base
         if self.wl_colapso and self.ciclo - self.t_colapso > 100:
             self.atender_wl()
-
-
-            # self.derivar_wl_agresivamente()
-
-            # if not self.ocupacion_wl_deseada[1]:
-            #     self.derivar_wl_agresivamente()
-            #     if self.ocupacion_wl_actual < self.ocupacion_wl_deseada[0]:
-            #         self.capacidad_maxima_wl = self.ocupacion_wl_deseada[0]
-            #         self.ocupacion_wl_deseada[1] = True
-            #         self.derivaciones_realizadas = 0
+        
+            # Si la WL sigue colapsada, reviso si puedo derivar agresivamente (solo al incio)
+            if not self.ocupacion_wl_deseada[1]:
+                self.derivar_wl_agresivamente()
+                # Si alcanzo la ocupacion deseada, termino derivaciones agresivas para siempre
+                if self.ocupacion_wl_actual < self.ocupacion_wl_deseada[0]:
+                    self.capacidad_maxima_wl = self.ocupacion_wl_deseada[0]
+                    self.ocupacion_wl_deseada[1] = True
+                    self.derivaciones_realizadas = 0
             
-    
         self.ciclo += 1
         return self.decisiones
 
