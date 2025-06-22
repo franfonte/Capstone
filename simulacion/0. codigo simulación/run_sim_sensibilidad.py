@@ -26,11 +26,11 @@ if __name__ == "__main__":
     nombre_carpeta = f"{nombre_base}_T{T_max}_C{ciclos}_H{hospital_id}_{unidad_nombre}".replace("/", "_")
     nombre_sub_carpeta = f"{'+' if delta >= 0 else ''}{delta}"
     carpeta_base = os.path.join("resultados sensibilidad", nombre_carpeta, nombre_sub_carpeta)
-    carpeta_logs = os.path.join(carpeta_base, "logs")
-    carpeta_plots = os.path.join(carpeta_base, "plots")
+    # carpeta_logs = os.path.join(carpeta_base, "logs")
+    # carpeta_plots = os.path.join(carpeta_base, "plots")
     carpeta_kpis = os.path.join(carpeta_base, "kpis")
-    os.makedirs(carpeta_logs, exist_ok=True)
-    os.makedirs(carpeta_plots, exist_ok=True)
+    # os.makedirs(carpeta_logs, exist_ok=True)
+    # os.makedirs(carpeta_plots, exist_ok=True)
     os.makedirs(carpeta_kpis, exist_ok=True)
 
     # Aplicar cambio temporal a parametros.py
@@ -72,7 +72,7 @@ if __name__ == "__main__":
         modelo=modelo,
         seed=seed,
         ciclos=ciclos,
-        save_dir=carpeta_plots
+        save_dir=None
     )
     print(f"✅ KPIs calculados en {time.time() - t0:.2f}s")
 
