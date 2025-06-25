@@ -41,32 +41,48 @@ class HospitalCapacityAnalyzer:
             print(f"Warning: Path not found: {unit_path}")
             return []
         
-        data = []
-        max_beds = 27  # Adjust if needed
-        
-        for i in range(1, max_beds + 1):
-            file_path = os.path.join(unit_path, f"+{i}.json")
-            if os.path.exists(file_path):
+        # First, discover what files actually exist
+        available_files = []
+        for file in os.listdir(unit_path):
+            if file.startswith('+') and file.endswith('.json'):
                 try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        json_data = json.load(f)
-                    
-                    costs = json_data['costo_diario_promedio']['General']
-                    
-                    # Also get patient information if available
-                    patient_info = json_data.get('tasa_entrada_vs_salida', {})
-                    total_patients = patient_info.get('total_entradas_por_ciclo', '0 ± 0')
-                    
-                    data.append({
-                        'beds': i,
-                        'social': self.extract_cost_value(costs['social']),
-                        'operational': self.extract_cost_value(costs['operativo']),
-                        'total': self.extract_cost_value(costs['total']),
-                        'patients_per_cycle': self.extract_cost_value(total_patients) if isinstance(total_patients, str) else 0
-                    })
-                    
-                except Exception as e:
-                    print(f"Error processing {file_path}: {e}")
+                    bed_number = int(file[1:-5])  # Extract number from "+X.json"
+                    available_files.append(bed_number)
+                except ValueError:
+                    continue
+        
+        if not available_files:
+            print(f"Warning: No valid increment files found in {unit_path}")
+            return []
+        
+        available_files.sort()
+        print(f"  Encontrados archivos para {hospital} {unit}: +{min(available_files)} a +{max(available_files)} ({len(available_files)} archivos)")
+        
+        data = []
+        
+        # Process only the files that actually exist
+        for i in available_files:
+            file_path = os.path.join(unit_path, f"+{i}.json")
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    json_data = json.load(f)
+                
+                costs = json_data['costo_diario_promedio']['General']
+                
+                # Also get patient information if available
+                patient_info = json_data.get('tasa_entrada_vs_salida', {})
+                total_patients = patient_info.get('total_entradas_por_ciclo', '0 ± 0')
+                
+                data.append({
+                    'beds': i,
+                    'social': self.extract_cost_value(costs['social']),
+                    'operational': self.extract_cost_value(costs['operativo']),
+                    'total': self.extract_cost_value(costs['total']),
+                    'patients_per_cycle': self.extract_cost_value(total_patients) if isinstance(total_patients, str) else 0
+                })
+                
+            except Exception as e:
+                print(f"Error processing {file_path}: {e}")
         
         return data
     
@@ -81,10 +97,18 @@ class HospitalCapacityAnalyzer:
             prev = data[i-1]
             curr = data[i]
             
+            # Calculate the actual increment in beds
+            bed_increment = curr['beds'] - prev['beds']
+            
             # Basic marginal benefits (cost reductions)
-            marginal_social = prev['social'] - curr['social']
-            marginal_operational = prev['operational'] - curr['operational']
-            marginal_total = prev['total'] - curr['total']
+            total_benefit_social = prev['social'] - curr['social']
+            total_benefit_operational = prev['operational'] - curr['operational']
+            total_benefit_total = prev['total'] - curr['total']
+            
+            # Marginal benefit per bed (benefit divided by number of beds added)
+            marginal_social = total_benefit_social / bed_increment if bed_increment > 0 else 0
+            marginal_operational = total_benefit_operational / bed_increment if bed_increment > 0 else 0
+            marginal_total = total_benefit_total / bed_increment if bed_increment > 0 else 0
             
             # NPV calculation (daily benefit extended to perpetuity)
             # NPV = Annual_Benefit / annual_discount_rate (perpetuity formula)
@@ -108,6 +132,10 @@ class HospitalCapacityAnalyzer:
             
             marginal_data.append({
                 'bed_number': curr['beds'],
+                'bed_increment': bed_increment,
+                'total_benefit_social': total_benefit_social,
+                'total_benefit_operational': total_benefit_operational,
+                'total_benefit_total': total_benefit_total,
                 'marginal_social': marginal_social,
                 'marginal_operational': marginal_operational,
                 'marginal_total': marginal_total,
@@ -134,12 +162,13 @@ class HospitalCapacityAnalyzer:
         last_beneficial_bed_total = positive_marginal_total[-1]['bed_number'] if positive_marginal_total else 1
         last_beneficial_bed_operational = positive_marginal_operational[-1]['bed_number'] if positive_marginal_operational else 1
         
-        # Calculate cumulative benefits
-        cumulative_benefit_total = sum(m['marginal_total'] for m in marginal_data[:last_beneficial_bed_total-1])
-        cumulative_benefit_operational = sum(m['marginal_operational'] for m in marginal_data[:last_beneficial_bed_operational-1])
+        # Calculate cumulative benefits (using total benefits, not marginal)
+        cumulative_benefit_total = sum(m['total_benefit_total'] for m in marginal_data if m['marginal_total'] > 0)
+        cumulative_benefit_operational = sum(m['total_benefit_operational'] for m in marginal_data if m['marginal_operational'] > 0)
         
-        cumulative_npv_total = sum(m['npv_total'] for m in marginal_data[:last_beneficial_bed_total-1])
-        cumulative_npv_operational = sum(m['npv_operational'] for m in marginal_data[:last_beneficial_bed_operational-1])
+        # Calculate cumulative NPV (using marginal NPV * bed increment for each step)
+        cumulative_npv_total = sum(m['npv_total'] * m['bed_increment'] for m in marginal_data if m['marginal_total'] > 0)
+        cumulative_npv_operational = sum(m['npv_operational'] * m['bed_increment'] for m in marginal_data if m['marginal_operational'] > 0)
         
         # Find maximum NPV per bed for each type
         max_npv_per_bed_total = max([m['npv_total'] for m in marginal_data]) if marginal_data else 0
@@ -202,10 +231,18 @@ class HospitalCapacityAnalyzer:
                    label=f'Última beneficiosa (+{analysis["last_beneficial_bed"]})')
         
         ax2.set_xlabel('Cama Adicional #')
-        ax2.set_ylabel('Beneficio Marginal Diario')
-        ax2.set_title('Beneficio Marginal por Cama')
+        ax2.set_ylabel('Beneficio Marginal Diario por Cama')
+        ax2.set_title('Beneficio Marginal por Cama (Ajustado por Incremento)')
         ax2.legend()
         ax2.grid(True, alpha=0.3)
+        
+        # Add annotation showing bed increments for first few points
+        for i, m in enumerate(marginal_data[:3]):
+            if m['bed_increment'] > 1:
+                ax2.annotate(f"Δ{m['bed_increment']}", 
+                           xy=(m['bed_number'], m['marginal_total']), 
+                           xytext=(5, 5), textcoords='offset points',
+                           fontsize=8, alpha=0.7)
         
         # Plot 3: NPV Analysis - Separated by type
         ax3.plot(marginal_beds, npv_operational, 'bo-', linewidth=2, markersize=4, label='VAN Operativo')
@@ -221,7 +258,7 @@ class HospitalCapacityAnalyzer:
                        label=f'Max VAN Op (+{max_npv_op_bed})')
         
         ax3.set_xlabel('Cama Adicional #')
-        ax3.set_ylabel('VAN (Valor Actual Neto)')
+        ax3.set_ylabel('VAN de beneficio marginal diario')
         ax3.set_title(f'VAN por Tipo de Costo (Tasa: {self.discount_rate:.1%})')
         ax3.legend()
         ax3.grid(True, alpha=0.3)
@@ -233,7 +270,11 @@ class HospitalCapacityAnalyzer:
         max_npv_operational_value = max(npv_operational) if npv_operational else 0
         positive_operational = [m for m in marginal_data if m['marginal_operational'] > 0]
         last_beneficial_operational = positive_operational[-1]['bed_number'] if positive_operational else 0
-        cumulative_npv_operational = sum(m['npv_operational'] for m in marginal_data if m['marginal_operational'] > 0)
+        cumulative_npv_operational = sum(m['npv_operational'] * m['bed_increment'] for m in marginal_data if m['marginal_operational'] > 0)
+        
+        # Check for non-unit increments
+        non_unit_increments = [m for m in marginal_data if m['bed_increment'] != 1]
+        increment_info = f" (Incrementos: {', '.join([str(m['bed_increment']) for m in marginal_data[:5]])}...)" if non_unit_increments else ""
         
         stats_text = f"""
         RESUMEN ECONÓMICO - {hospital} {unit}
@@ -251,7 +292,7 @@ class HospitalCapacityAnalyzer:
         ANÁLISIS SOCIAL:
         VAN acumulado social: ${analysis['cumulative_npv'] - cumulative_npv_operational:,.0f}
         
-        Tasa de descuento: {self.discount_rate:.1%} anual
+        Tasa de descuento: {self.discount_rate:.1%} anual{increment_info}
         """
         ax4.text(0.05, 0.95, stats_text, transform=ax4.transAxes, fontsize=10,
                 verticalalignment='top', fontfamily='monospace',
@@ -318,6 +359,9 @@ class HospitalCapacityAnalyzer:
         
         # Create summary
         self.create_summary_analysis(summary_data)
+        
+        # Store summary data for potential external use
+        self.summary_data = summary_data
         
         print(f"\n=== ANÁLISIS COMPLETADO ===")
         print(f"Se analizaron {len(self.results)} unidades")
