@@ -456,7 +456,7 @@ class HospitalCapacityAnalyzer:
 def main():
     """Main execution function"""
     # Initialize analyzer with 1% discount rate
-    analyzer = HospitalCapacityAnalyzer(discount_rate=0.01)
+    analyzer = HospitalCapacityAnalyzer(discount_rate=(100/99-1))
     
     # Run complete analysis
     analyzer.analyze_all_units()
