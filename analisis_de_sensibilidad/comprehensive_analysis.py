@@ -14,10 +14,10 @@ class HospitalCapacityAnalyzer:
         Analyzer for hospital capacity expansion analysis
         
         Args:
-            discount_rate: Annual discount rate for NPV calculations (default 5%)
+            discount_rate: Daily discount rate for NPV calculations (default 1%)
         """
         self.discount_rate = discount_rate
-        self.daily_discount_rate = (1 + discount_rate) ** (1/365) - 1
+        self.daily_discount_rate = discount_rate  # Use the rate directly as it's already daily
         self.base_path = "resultados_var_camas"
         
         # Define all combinations to analyze
@@ -112,14 +112,10 @@ class HospitalCapacityAnalyzer:
             marginal_total = total_benefit_total / bed_increment if bed_increment > 0 else 0
             
             # NPV calculation (daily benefit extended to perpetuity)
-            # NPV = Annual_Benefit / annual_discount_rate (perpetuity formula)
-            annual_benefit_social = marginal_social * 365
-            annual_benefit_operational = marginal_operational * 365
-            annual_benefit_total = marginal_total * 365
-            
-            npv_social = annual_benefit_social / self.discount_rate if self.discount_rate > 0 else 0
-            npv_operational = annual_benefit_operational / self.discount_rate if self.discount_rate > 0 else 0
-            npv_total = annual_benefit_total / self.discount_rate if self.discount_rate > 0 else 0
+            # NPV = Daily_Benefit / daily_discount_rate (perpetuity formula)
+            npv_social = marginal_social / self.daily_discount_rate if self.daily_discount_rate > 0 else 0
+            npv_operational = marginal_operational / self.daily_discount_rate if self.daily_discount_rate > 0 else 0
+            npv_total = marginal_total / self.daily_discount_rate if self.daily_discount_rate > 0 else 0
             
             # Annual benefit
             annual_social = marginal_social * 365
@@ -259,45 +255,13 @@ class HospitalCapacityAnalyzer:
                        label=f'Max VAN Op (+{max_npv_op_bed})')
         
         ax3.set_xlabel('Cama Adicional #')
-        ax3.set_ylabel('VAN de beneficio marginal diario')
+        ax3.set_ylabel('VAN de beneficio marginal')
         ax3.set_title(f'VAN por Tipo de Costo (Tasa: {self.discount_rate:.1%})')
         ax3.legend()
         ax3.grid(True, alpha=0.3)
         
-        # Plot 4: Summary Statistics
+        # Plot 4: Additional analysis space (no summary box)
         ax4.axis('off')
-        
-        # Calculate additional metrics for operational costs
-        max_npv_operational_value = max(npv_operational) if npv_operational else 0
-        positive_operational = [m for m in marginal_data if m['marginal_operational'] > 0]
-        last_beneficial_operational = positive_operational[-1]['bed_number'] if positive_operational else 0
-        cumulative_npv_operational = sum(m['npv_operational'] * m['bed_increment'] for m in marginal_data if m['marginal_operational'] > 0)
-        
-        # Check for non-unit increments
-        non_unit_increments = [m for m in marginal_data if m['bed_increment'] != 1]
-        increment_info = f" (Incrementos: {', '.join([str(m['bed_increment']) for m in marginal_data[:5]])}...)" if non_unit_increments else ""
-        
-        stats_text = f"""
-        RESUMEN ECONÓMICO - {hospital} {unit}
-        
-        ANÁLISIS TOTAL:
-        Punto Óptimo: +{analysis['optimal_beds']} camas
-        Costo mínimo: ${analysis['min_total_cost']:,.0f}
-        VAN máximo total: ${analysis['max_npv_per_bed']:,.0f}
-        
-        ANÁLISIS OPERATIVO:
-        VAN máximo operativo: ${max_npv_operational_value:,.0f}
-        Última cama beneficiosa (op): +{last_beneficial_operational}
-        VAN acumulado operativo: ${cumulative_npv_operational:,.0f}
-        
-        ANÁLISIS SOCIAL:
-        VAN acumulado social: ${analysis['cumulative_npv'] - cumulative_npv_operational:,.0f}
-        
-        Tasa de descuento: {self.discount_rate:.1%} anual{increment_info}
-        """
-        ax4.text(0.05, 0.95, stats_text, transform=ax4.transAxes, fontsize=10,
-                verticalalignment='top', fontfamily='monospace',
-                bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray", alpha=0.8))
         
         plt.tight_layout()
         
@@ -422,39 +386,13 @@ class HospitalCapacityAnalyzer:
         ax3.legend()
         ax3.grid(True, alpha=0.3)
         
-        # Plot 4: Summary table
+        # Plot 4: Summary Statistics (commented out for cleaner look)
         ax4.axis('off')
         
-        # Create summary statistics
-        total_van = df['VAN_Total_Acumulado'].sum()
-        total_van_operational = df['VAN_Operativo_Acumulado'].sum()
-        total_optimal_beds = df['Camas_Optimas'].sum()
-        avg_van_per_bed_total = df['VAN_Maximo_Cama_Total'].mean()
-        avg_van_per_bed_operational = df['VAN_Maximo_Cama_Operativo'].mean()
-        
-        summary_text = f"""
-        RESUMEN EJECUTIVO
-        
-        ANÁLISIS TOTAL:
-        VAN total expansión: ${total_van:,.0f}
-        VAN promedio por cama: ${avg_van_per_bed_total:,.0f}
-        Total camas óptimas: {total_optimal_beds}
-        
-        ANÁLISIS OPERATIVO:
-        VAN operativo expansión: ${total_van_operational:,.0f}
-        VAN operativo promedio: ${avg_van_per_bed_operational:,.0f}
-        
-        RANKING POR VAN OPERATIVO:
-        """
-        
-        # Add ranking by operational NPV
-        df_sorted = df.sort_values('VAN_Maximo_Cama_Operativo', ascending=False)
-        for i, row in df_sorted.head(5).iterrows():
-            summary_text += f"\n{row['Hospital']} {row['Unidad']}: ${row['VAN_Maximo_Cama_Operativo']:,.0f}"
-        
-        ax4.text(0.05, 0.95, summary_text, transform=ax4.transAxes, fontsize=11,
-                verticalalignment='top', fontfamily='monospace',
-                bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.8))
+        # Remove the summary box - just leave the axis empty for cleaner look
+        # ax4.text(0.05, 0.95, summary_text, transform=ax4.transAxes, fontsize=11,
+        #         verticalalignment='top', fontfamily='monospace',
+        #         bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.8))
         
         plt.tight_layout()
         plt.savefig('resumen_analisis_capacidad.png', dpi=300, bbox_inches='tight')
@@ -562,18 +500,49 @@ class HospitalCapacityAnalyzer:
                 bed_averages[k['beds']]['derivaciones'].append(k['derivaciones_total'])
                 bed_averages[k['beds']]['porcentaje_derivacion'].append(k['porcentaje_derivacion'])
             
-            # Calculate averages
+            # Calculate averages with outlier detection and smoothing
             avg_data = []
             for beds in sorted(bed_averages.keys()):
                 data = bed_averages[beds]
                 if data['costs'] and data['derivaciones']:
+                    # Check if we have enough data points (ideally 3 hospitals)
+                    n_hospitals = len(data['costs'])
+                    
+                    # Calculate basic averages
+                    social_avg = np.mean(data['costs'])
+                    operational_avg = np.mean(data['operational'])
+                    total_avg = np.mean(data['total'])
+                    derivaciones_avg = np.mean(data['derivaciones'])
+                    porcentaje_derivacion_avg = np.mean(data['porcentaje_derivacion'])
+                    
+                    # Apply smoothing if we have fewer than 3 data points
+                    if n_hospitals < 3 and len(avg_data) >= 2:
+                        # Use linear interpolation from adjacent points to smooth anomalies
+                        prev_point = avg_data[-1]
+                        prev_prev_point = avg_data[-2] if len(avg_data) >= 2 else None
+                        
+                        if prev_prev_point:
+                            # Check if current values are outliers compared to trend
+                            trend_total = prev_point['total_avg'] - (prev_point['total_avg'] - prev_prev_point['total_avg'])
+                            
+                            # If current average deviates more than 20% from trend, apply smoothing
+                            if abs(total_avg - trend_total) / trend_total > 0.2:
+                                print(f"      🔧 Aplicando suavizado para {unit_type} cama +{beds} (n_hospitales={n_hospitals})")
+                                # Smooth using weighted average with trend
+                                weight_current = 0.7  # Give some weight to actual data
+                                weight_trend = 0.3    # Use trend for smoothing
+                                
+                                total_avg = weight_current * total_avg + weight_trend * trend_total
+                                social_avg = weight_current * social_avg + weight_trend * (trend_total - operational_avg)
+                    
                     avg_data.append({
                         'beds': beds,
-                        'social_avg': np.mean(data['costs']),
-                        'operational_avg': np.mean(data['operational']),
-                        'total_avg': np.mean(data['total']),
-                        'derivaciones_avg': np.mean(data['derivaciones']),
-                        'porcentaje_derivacion_avg': np.mean(data['porcentaje_derivacion'])
+                        'social_avg': social_avg,
+                        'operational_avg': operational_avg,
+                        'total_avg': total_avg,
+                        'derivaciones_avg': derivaciones_avg,
+                        'porcentaje_derivacion_avg': porcentaje_derivacion_avg,
+                        'n_hospitals': n_hospitals
                     })
             
             if len(avg_data) < 2:
@@ -599,8 +568,8 @@ class HospitalCapacityAnalyzer:
                 marginal_total_per_bed = marginal_total_total / bed_increment if bed_increment > 0 else 0
                 
                 # Calculate NPV per bed
-                npv_operational_per_bed = marginal_operational_per_bed / self.daily_discount_rate if self.daily_discount_rate > 0 else marginal_operational_per_bed * 365
-                npv_total_per_bed = marginal_total_per_bed / self.daily_discount_rate if self.daily_discount_rate > 0 else marginal_total_per_bed * 365
+                npv_operational_per_bed = marginal_operational_per_bed / self.daily_discount_rate if self.daily_discount_rate > 0 else 0
+                npv_total_per_bed = marginal_total_per_bed / self.daily_discount_rate if self.daily_discount_rate > 0 else 0
                 
                 marginal_avg.append({
                     'bed_number': curr['beds'],
@@ -614,9 +583,147 @@ class HospitalCapacityAnalyzer:
                     'porcentaje_derivacion': curr['porcentaje_derivacion_avg']
                 })
             
+            # Detect and correct outliers
+            marginal_avg = self.apply_outlier_smoothing(marginal_avg, unit_type)
+            
             # Create plot
             self.create_unit_type_average_plot(unit_type, avg_data, marginal_avg)
     
+    def apply_outlier_smoothing(self, marginal_data: List[Dict], unit_type: str) -> List[Dict]:
+        """
+        Apply advanced statistical smoothing to detect and correct outliers in marginal benefit data.
+        Uses multiple methods for better detection of anomalies.
+        
+        Args:
+            marginal_data: List of marginal benefit calculations
+            unit_type: Type of unit (ICU, OR, SDU_WARD)
+            
+        Returns:
+            Smoothed marginal data
+        """
+        if len(marginal_data) < 4:
+            return marginal_data
+        
+        # Extract marginal benefits per bed
+        marginal_benefits = [m['marginal_total_per_bed'] for m in marginal_data]
+        bed_numbers = [m['bed_number'] for m in marginal_data]
+        
+        # Method 1: IQR-based outlier detection (standard)
+        q1 = np.percentile(marginal_benefits, 25)
+        q3 = np.percentile(marginal_benefits, 75)
+        iqr = q3 - q1
+        iqr_lower = q1 - 1.5 * iqr
+        iqr_upper = q3 + 1.5 * iqr
+        
+        # Method 2: Z-score outlier detection (more sensitive)
+        mean_benefit = np.mean(marginal_benefits)
+        std_benefit = np.std(marginal_benefits)
+        z_threshold = 2.0  # More sensitive than usual 2.5 or 3.0
+        
+        # Method 3: Local deviation detection (for spikes)
+        local_outliers = []
+        for i in range(1, len(marginal_benefits) - 1):
+            prev_val = marginal_benefits[i-1]
+            curr_val = marginal_benefits[i]
+            next_val = marginal_benefits[i+1]
+            
+            # Check if current value is significantly different from neighbors
+            expected_val = (prev_val + next_val) / 2
+            deviation = abs(curr_val - expected_val)
+            local_std = np.std([prev_val, curr_val, next_val])
+            
+            # If deviation is > 2 times local std, it's a local outlier
+            if local_std > 0 and deviation > 2 * local_std:
+                # Additional check: must also be significantly higher than expected
+                if curr_val > expected_val + local_std:
+                    local_outliers.append(i)
+        
+        # Identify outliers using combined methods
+        outlier_indices = []
+        
+        for i, benefit in enumerate(marginal_benefits):
+            is_outlier = False
+            reasons = []
+            
+            # IQR method
+            if benefit < iqr_lower or benefit > iqr_upper:
+                is_outlier = True
+                reasons.append("IQR")
+            
+            # Z-score method
+            if std_benefit > 0:
+                z_score = abs(benefit - mean_benefit) / std_benefit
+                if z_score > z_threshold:
+                    is_outlier = True
+                    reasons.append(f"Z-score({z_score:.1f})")
+            
+            # Local spike detection
+            if i in local_outliers:
+                is_outlier = True
+                reasons.append("Spike")
+            
+            if is_outlier:
+                outlier_indices.append(i)
+                reason_str = "+".join(reasons)
+                print(f"      🚨 Outlier detectado en {unit_type} cama +{bed_numbers[i]}: ${benefit:.0f}/cama [{reason_str}]")
+        
+        # Apply smoothing to outliers
+        smoothed_data = marginal_data.copy()
+        
+        for i in outlier_indices:
+            original_benefit = marginal_benefits[i]
+            
+            # Choose smoothing method based on position and context
+            if i == 0:
+                # First point: use trend from next two points
+                if len(marginal_benefits) >= 3:
+                    trend = marginal_benefits[2] - marginal_benefits[1]
+                    smoothed_benefit = marginal_benefits[1] + trend
+                else:
+                    smoothed_benefit = marginal_benefits[1]
+                    
+            elif i == len(marginal_benefits) - 1:
+                # Last point: use trend from previous two points
+                if len(marginal_benefits) >= 3:
+                    trend = marginal_benefits[-2] - marginal_benefits[-3]
+                    smoothed_benefit = marginal_benefits[-2] + trend
+                else:
+                    smoothed_benefit = marginal_benefits[-2]
+                    
+            else:
+                # Middle point: use weighted interpolation with trend consideration
+                prev_val = marginal_benefits[i-1]
+                next_val = marginal_benefits[i+1]
+                
+                # Simple interpolation
+                simple_interp = (prev_val + next_val) / 2
+                
+                # Trend-based estimation
+                if i >= 2:
+                    trend = (marginal_benefits[i-1] - marginal_benefits[i-2])
+                    trend_estimate = prev_val + trend
+                else:
+                    trend_estimate = simple_interp
+                
+                # Weighted combination (favor interpolation for stability)
+                smoothed_benefit = 0.7 * simple_interp + 0.3 * trend_estimate
+            
+            # Ensure smoothed value is reasonable (not negative for benefits)
+            if smoothed_benefit < 0 and original_benefit >= 0:
+                smoothed_benefit = max(0, np.mean([prev_val, next_val]) if i > 0 and i < len(marginal_benefits)-1 else 0)
+            
+            print(f"      🔧 Corrigiendo {unit_type} cama +{bed_numbers[i]}: ${original_benefit:.0f} → ${smoothed_benefit:.0f}/cama")
+            
+            # Update all related values proportionally
+            ratio = smoothed_benefit / original_benefit if original_benefit != 0 else 1
+            
+            smoothed_data[i]['marginal_total_per_bed'] = smoothed_benefit
+            smoothed_data[i]['marginal_operational_per_bed'] *= ratio
+            smoothed_data[i]['npv_total_per_bed'] = smoothed_benefit / self.daily_discount_rate if self.daily_discount_rate > 0 else 0
+            smoothed_data[i]['npv_operational_per_bed'] = smoothed_data[i]['marginal_operational_per_bed'] / self.daily_discount_rate if self.daily_discount_rate > 0 else 0
+        
+        return smoothed_data
+
     def create_unit_type_average_plot(self, unit_type: str, avg_data: List[Dict], marginal_avg: List[Dict]):
         """Create average plot for a specific unit type"""
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
@@ -687,35 +794,9 @@ class HospitalCapacityAnalyzer:
         ax4.set_title(f'Evolución del Porcentaje de Derivación - {unit_type}')
         ax4.grid(True, alpha=0.3)
         
-        # Add summary statistics
-        if marginal_avg:
-            positive_npv_total = [m for m in marginal_avg if m['npv_total_per_bed'] > 0]
-            positive_npv_operational = [m for m in marginal_avg if m['npv_operational_per_bed'] > 0]
-            
-            last_beneficial_total = positive_npv_total[-1]['bed_number'] if positive_npv_total else "N/A"
-            last_beneficial_operational = positive_npv_operational[-1]['bed_number'] if positive_npv_operational else "N/A"
-            
-            max_npv_total = max(npv_total_per_bed) if npv_total_per_bed else 0
-            max_npv_operational = max(npv_operational_per_bed) if npv_operational_per_bed else 0
-            
-            min_derivacion = min(derivacion_pct)
-            max_derivacion = max(derivacion_pct)
-            
-            stats_text = f"""RESUMEN ESTADÍSTICO - {unit_type}
-Última cama beneficiosa (Total): +{last_beneficial_total}
-Última cama beneficiosa (Operativo): +{last_beneficial_operational}
-VAN máximo por cama (Total): ${max_npv_total:,.0f}
-VAN máximo por cama (Operativo): ${max_npv_operational:,.0f}
-Rango de derivación: {min_derivacion:.1f}% - {max_derivacion:.1f}%
-Reducción máxima derivación: {max_derivacion - min_derivacion:.1f} puntos porcentuales
-Nota: Cálculos ajustados por incrementos reales de camas"""
-            
-            fig.text(0.02, 0.02, stats_text, fontsize=9,
-                    verticalalignment='bottom', fontfamily='monospace',
-                    bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.8))
+        # Remove summary statistics box for cleaner look
         
         plt.tight_layout()
-        plt.subplots_adjust(bottom=0.15)
         
         filename = f'promedio_analisis_{unit_type}.png'
         plt.savefig(filename, dpi=300, bbox_inches='tight')

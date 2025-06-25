@@ -82,7 +82,7 @@ Con tasa de descuento del 1% anual:
 
 ### 3.1 Unidades de Cuidados Intensivos (UCI)
 
-![Análisis UCI H1](analisis_H1_ICU.png)
+![Análisis UCI H1](promedio_analisis_ICU.png)
 
 **Comportamiento típico:**
 - **Reducción inicial pronunciada**: Los primeros incrementos de camas generan beneficios sustanciales
