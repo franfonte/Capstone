@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple
+from collections import defaultdict
 
 class HospitalCapacityAnalyzer:
     def __init__(self, discount_rate: float = 0.01):
@@ -360,6 +361,9 @@ class HospitalCapacityAnalyzer:
         # Create summary
         self.create_summary_analysis(summary_data)
         
+        # Generate average plots by unit type
+        self.create_average_plots_by_unit_type()
+        
         # Store summary data for potential external use
         self.summary_data = summary_data
         
@@ -370,6 +374,9 @@ class HospitalCapacityAnalyzer:
             print(f"  - {result['plot_file']}")
         print("  - resumen_analisis_capacidad.png")
         print("  - resumen_analisis_capacidad.csv")
+        print("  - promedio_analisis_ICU.png")
+        print("  - promedio_analisis_OR.png")
+        print("  - promedio_analisis_SDU_WARD.png")
     
     def create_summary_analysis(self, summary_data: List[Dict]):
         """Create summary analysis and comparison"""
@@ -452,6 +459,269 @@ class HospitalCapacityAnalyzer:
         plt.tight_layout()
         plt.savefig('resumen_analisis_capacidad.png', dpi=300, bbox_inches='tight')
         plt.close()
+
+    def extract_kpi_value(self, kpi_str: str) -> float:
+        """Extract numerical value from KPI string like '2948.57 ± 26.93'"""
+        return float(kpi_str.split(' ± ')[0])
+    
+    def load_unit_kpis(self, hospital: str, unit: str) -> List[Dict]:
+        """Load KPI data for a specific hospital/unit combination"""
+        folder_name = f"ModeloProactivo_T4500_C4208_{hospital}_{unit}"
+        unit_path = os.path.join(self.base_path, folder_name)
+        
+        if not os.path.exists(unit_path):
+            return []
+        
+        # Discover available files
+        available_files = []
+        for file in os.listdir(unit_path):
+            if file.startswith('+') and file.endswith('.json'):
+                try:
+                    bed_number = int(file[1:-5])
+                    available_files.append(bed_number)
+                except ValueError:
+                    continue
+        
+        available_files.sort()
+        data = []
+        
+        for i in available_files:
+            file_path = os.path.join(unit_path, f"+{i}.json")
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    json_data = json.load(f)
+                
+                # Extract KPI data
+                costs = json_data['costo_diario_promedio']['General']
+                entrada_salida = json_data['tasa_entrada_vs_salida']
+                
+                # Calculate derivation percentages
+                derivaciones_wl = self.extract_kpi_value(costs['derivaciones_wl'])
+                derivaciones_ed = self.extract_kpi_value(costs['derivaciones_ed'])
+                total_entradas = self.extract_kpi_value(entrada_salida['total_entradas_por_ciclo'])
+                
+                # Calculate daily values (assuming 365 days per year and cycles)
+                derivaciones_total = derivaciones_wl + derivaciones_ed
+                porcentaje_derivacion = (derivaciones_total / (total_entradas * 365)) * 100 if total_entradas > 0 else 0
+                
+                data.append({
+                    'beds': i,
+                    'derivaciones_wl': derivaciones_wl,
+                    'derivaciones_ed': derivaciones_ed,
+                    'derivaciones_total': derivaciones_total,
+                    'total_entradas_ciclo': total_entradas,
+                    'porcentaje_derivacion': porcentaje_derivacion,
+                    'social': self.extract_cost_value(costs['social']),
+                    'operational': self.extract_cost_value(costs['operativo']),
+                    'total': self.extract_cost_value(costs['total'])
+                })
+                
+            except Exception as e:
+                print(f"Error processing KPIs from {file_path}: {e}")
+        
+        return data
+
+    def create_average_plots_by_unit_type(self):
+        """Create average plots for each unit type (ICU, OR, SDU_WARD)"""
+        print("\n=== GENERANDO GRÁFICOS PROMEDIO POR TIPO DE UNIDAD ===")
+        
+        # Group data by unit type
+        unit_types = ['ICU', 'OR', 'SDU_WARD']
+        
+        for unit_type in unit_types:
+            print(f"\nProcesando tipo de unidad: {unit_type}")
+            
+            # Collect data from all hospitals for this unit type
+            all_data = []
+            all_kpis = []
+            
+            for hospital in ['H1', 'H2', 'H3']:
+                costs_data = self.load_unit_costs(hospital, unit_type)
+                kpi_data = self.load_unit_kpis(hospital, unit_type)
+                
+                if costs_data and kpi_data:
+                    all_data.extend(costs_data)
+                    all_kpis.extend(kpi_data)
+            
+            if not all_data:
+                print(f"  No se encontraron datos para {unit_type}")
+                continue
+            
+            # Group by bed number and calculate averages
+            bed_averages = defaultdict(lambda: {
+                'costs': [], 'operational': [], 'total': [],
+                'derivaciones': [], 'porcentaje_derivacion': []
+            })
+            
+            for d in all_data:
+                bed_averages[d['beds']]['costs'].append(d['social'])
+                bed_averages[d['beds']]['operational'].append(d['operational'])
+                bed_averages[d['beds']]['total'].append(d['total'])
+            
+            for k in all_kpis:
+                bed_averages[k['beds']]['derivaciones'].append(k['derivaciones_total'])
+                bed_averages[k['beds']]['porcentaje_derivacion'].append(k['porcentaje_derivacion'])
+            
+            # Calculate averages
+            avg_data = []
+            for beds in sorted(bed_averages.keys()):
+                data = bed_averages[beds]
+                if data['costs'] and data['derivaciones']:
+                    avg_data.append({
+                        'beds': beds,
+                        'social_avg': np.mean(data['costs']),
+                        'operational_avg': np.mean(data['operational']),
+                        'total_avg': np.mean(data['total']),
+                        'derivaciones_avg': np.mean(data['derivaciones']),
+                        'porcentaje_derivacion_avg': np.mean(data['porcentaje_derivacion'])
+                    })
+            
+            if len(avg_data) < 2:
+                print(f"  Datos insuficientes para {unit_type}")
+                continue
+            
+            # Calculate marginal analysis for averages
+            marginal_avg = []
+            for i in range(1, len(avg_data)):
+                prev = avg_data[i-1]
+                curr = avg_data[i]
+                
+                bed_increment = curr['beds'] - prev['beds']
+                
+                # Calculate marginal benefits (cost reduction) - TOTAL benefits for the increment
+                marginal_social_total = prev['social_avg'] - curr['social_avg']
+                marginal_operational_total = prev['operational_avg'] - curr['operational_avg']
+                marginal_total_total = prev['total_avg'] - curr['total_avg']
+                
+                # Calculate marginal benefits PER CAMA (dividing by actual bed increment)
+                marginal_social_per_bed = marginal_social_total / bed_increment if bed_increment > 0 else 0
+                marginal_operational_per_bed = marginal_operational_total / bed_increment if bed_increment > 0 else 0
+                marginal_total_per_bed = marginal_total_total / bed_increment if bed_increment > 0 else 0
+                
+                # Calculate NPV per bed
+                npv_operational_per_bed = marginal_operational_per_bed / self.daily_discount_rate if self.daily_discount_rate > 0 else marginal_operational_per_bed * 365
+                npv_total_per_bed = marginal_total_per_bed / self.daily_discount_rate if self.daily_discount_rate > 0 else marginal_total_per_bed * 365
+                
+                marginal_avg.append({
+                    'bed_number': curr['beds'],
+                    'bed_increment': bed_increment,
+                    'marginal_operational_total': marginal_operational_total,
+                    'marginal_total_total': marginal_total_total,
+                    'marginal_operational_per_bed': marginal_operational_per_bed,
+                    'marginal_total_per_bed': marginal_total_per_bed,
+                    'npv_operational_per_bed': npv_operational_per_bed,
+                    'npv_total_per_bed': npv_total_per_bed,
+                    'porcentaje_derivacion': curr['porcentaje_derivacion_avg']
+                })
+            
+            # Create plot
+            self.create_unit_type_average_plot(unit_type, avg_data, marginal_avg)
+    
+    def create_unit_type_average_plot(self, unit_type: str, avg_data: List[Dict], marginal_avg: List[Dict]):
+        """Create average plot for a specific unit type"""
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+        
+        beds = [d['beds'] for d in avg_data]
+        social_costs = [d['social_avg'] for d in avg_data]
+        operational_costs = [d['operational_avg'] for d in avg_data]
+        total_costs = [d['total_avg'] for d in avg_data]
+        derivacion_pct = [d['porcentaje_derivacion_avg'] for d in avg_data]
+        
+        # Plot 1: Cost Evolution
+        ax1.plot(beds, social_costs, 'o-', label='Costo Social', linewidth=2, markersize=6)
+        ax1.plot(beds, operational_costs, 's-', label='Costo Operativo', linewidth=2, markersize=6)
+        ax1.plot(beds, total_costs, '^-', label='Costo Total', linewidth=2, markersize=6)
+        ax1.set_xlabel('Incremento de Camas')
+        ax1.set_ylabel('Costo Diario Promedio (USD)')
+        ax1.set_title(f'Evolución de Costos - {unit_type} (Promedio 3 Hospitales)')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot 2: Marginal Benefits per bed
+        if marginal_avg:
+            marginal_beds = [m['bed_number'] for m in marginal_avg]
+            marginal_operational_per_bed = [m['marginal_operational_per_bed'] for m in marginal_avg]
+            marginal_total_per_bed = [m['marginal_total_per_bed'] for m in marginal_avg]
+            bed_increments = [m['bed_increment'] for m in marginal_avg]
+            
+            # Plot lines instead of bars
+            ax2.plot(marginal_beds, marginal_operational_per_bed, 'o-', 
+                    label='Beneficio Operativo/Cama', linewidth=2, markersize=6)
+            ax2.plot(marginal_beds, marginal_total_per_bed, 's-', 
+                    label='Beneficio Total/Cama', linewidth=2, markersize=6)
+            ax2.axhline(y=0, color='red', linestyle='--', alpha=0.5)
+            ax2.set_xlabel('Incremento de Camas')
+            ax2.set_ylabel('Beneficio Marginal por Cama (USD/día)')
+            ax2.set_title(f'Beneficio Marginal por Cama - {unit_type}')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            
+            # Add annotations for bed increments where they are not 1
+            for i, (bed, increment) in enumerate(zip(marginal_beds, bed_increments)):
+                if increment > 1:
+                    ax2.annotate(f'Δ{increment}', xy=(bed, marginal_total_per_bed[i]), 
+                               xytext=(5, 5), textcoords='offset points', fontsize=8,
+                               bbox=dict(boxstyle="round,pad=0.2", facecolor="yellow", alpha=0.7))
+        
+        # Plot 3: NPV Analysis per bed
+        if marginal_avg:
+            npv_operational_per_bed = [m['npv_operational_per_bed'] for m in marginal_avg]
+            npv_total_per_bed = [m['npv_total_per_bed'] for m in marginal_avg]
+            
+            # Plot lines instead of bars
+            ax3.plot(marginal_beds, npv_operational_per_bed, 'o-', 
+                    label='VAN Operativo/Cama', linewidth=2, markersize=6)
+            ax3.plot(marginal_beds, npv_total_per_bed, 's-', 
+                    label='VAN Total/Cama', linewidth=2, markersize=6)
+            ax3.axhline(y=0, color='red', linestyle='--', alpha=0.5)
+            ax3.set_xlabel('Incremento de Camas')
+            ax3.set_ylabel('VAN por Cama (USD)')
+            ax3.set_title(f'Valor Actual Neto por Cama - {unit_type}')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+        
+        # Plot 4: Derivation Percentage
+        ax4.plot(beds, derivacion_pct, 'ro-', linewidth=2, markersize=6)
+        ax4.set_xlabel('Incremento de Camas')
+        ax4.set_ylabel('Porcentaje de Derivación (%)')
+        ax4.set_title(f'Evolución del Porcentaje de Derivación - {unit_type}')
+        ax4.grid(True, alpha=0.3)
+        
+        # Add summary statistics
+        if marginal_avg:
+            positive_npv_total = [m for m in marginal_avg if m['npv_total_per_bed'] > 0]
+            positive_npv_operational = [m for m in marginal_avg if m['npv_operational_per_bed'] > 0]
+            
+            last_beneficial_total = positive_npv_total[-1]['bed_number'] if positive_npv_total else "N/A"
+            last_beneficial_operational = positive_npv_operational[-1]['bed_number'] if positive_npv_operational else "N/A"
+            
+            max_npv_total = max(npv_total_per_bed) if npv_total_per_bed else 0
+            max_npv_operational = max(npv_operational_per_bed) if npv_operational_per_bed else 0
+            
+            min_derivacion = min(derivacion_pct)
+            max_derivacion = max(derivacion_pct)
+            
+            stats_text = f"""RESUMEN ESTADÍSTICO - {unit_type}
+Última cama beneficiosa (Total): +{last_beneficial_total}
+Última cama beneficiosa (Operativo): +{last_beneficial_operational}
+VAN máximo por cama (Total): ${max_npv_total:,.0f}
+VAN máximo por cama (Operativo): ${max_npv_operational:,.0f}
+Rango de derivación: {min_derivacion:.1f}% - {max_derivacion:.1f}%
+Reducción máxima derivación: {max_derivacion - min_derivacion:.1f} puntos porcentuales
+Nota: Cálculos ajustados por incrementos reales de camas"""
+            
+            fig.text(0.02, 0.02, stats_text, fontsize=9,
+                    verticalalignment='bottom', fontfamily='monospace',
+                    bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.8))
+        
+        plt.tight_layout()
+        plt.subplots_adjust(bottom=0.15)
+        
+        filename = f'promedio_analisis_{unit_type}.png'
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"  ✓ Gráfico promedio generado: {filename}")
 
 def main():
     """Main execution function"""
