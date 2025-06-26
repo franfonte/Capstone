@@ -208,9 +208,9 @@ class HospitalCapacityAnalyzer:
         npv_social = [m['npv_social'] for m in marginal_data]
         
         # Plot 1: Cost Evolution
-        ax1.plot(beds, social_costs, 'ro-', linewidth=2, markersize=4, label='Social')
-        ax1.plot(beds, operational_costs, 'bo-', linewidth=2, markersize=4, label='Operativo')
-        ax1.plot(beds, total_costs, 'go-', linewidth=2, markersize=4, label='Total')
+        ax1.plot(beds, social_costs, 'o-', color='green', linewidth=2, markersize=4, label='Social')
+        ax1.plot(beds, operational_costs, 'o-', color='red', linewidth=2, markersize=4, label='Operativo')
+        ax1.plot(beds, total_costs, 'o-', color='black', linewidth=2, markersize=4, label='Total')
         ax1.axvline(x=analysis['optimal_beds'], color='purple', linestyle='--', alpha=0.7, label=f'Óptimo (+{analysis["optimal_beds"]})')
         
         ax1.set_xlabel('Camas Adicionales')
@@ -218,20 +218,37 @@ class HospitalCapacityAnalyzer:
         ax1.set_title(f'Evolución de Costos - {hospital} {unit}')
         ax1.legend()
         ax1.grid(True, alpha=0.3)
+        # Set integer ticks for x-axis
+        ax1.set_xticks(range(min(beds), max(beds)+1, max(1, (max(beds)-min(beds))//10)))
         
         # Plot 2: Marginal Benefits
-        ax2.plot(marginal_beds, marginal_social, 'ro-', linewidth=2, markersize=4, label='Social')
-        ax2.plot(marginal_beds, marginal_operational, 'bo-', linewidth=2, markersize=4, label='Operativo')
-        ax2.plot(marginal_beds, marginal_total, 'go-', linewidth=2, markersize=4, label='Total')
+        ax2.plot(marginal_beds, marginal_social, 'o-', color='green', linewidth=2, markersize=4, label='Social')
+        ax2.plot(marginal_beds, marginal_operational, 'o-', color='red', linewidth=2, markersize=4, label='Operativo')
+        ax2.plot(marginal_beds, marginal_total, 'o-', color='black', linewidth=2, markersize=4, label='Total')
         ax2.axhline(y=0, color='black', linestyle='--', alpha=0.5)
         ax2.axvline(x=analysis['last_beneficial_bed'], color='red', linestyle='--', alpha=0.7, 
                    label=f'Última beneficiosa (+{analysis["last_beneficial_bed"]})')
         
+        # Find maximum marginal benefit and add VAN annotation
+        if marginal_total:
+            max_marginal_benefit = max(marginal_total)
+            max_marginal_index = marginal_total.index(max_marginal_benefit)
+            max_marginal_bed = marginal_beds[max_marginal_index]
+            max_van_total = npv_total[max_marginal_index]
+            
+            # Add a text box in the upper left corner of the plot
+            ax2.text(0.02, 0.98, f'Beneficio Máximo:\n${max_marginal_benefit:.0f}/día (cama +{max_marginal_bed})\nVAN: ${max_van_total:,.0f}', 
+                    transform=ax2.transAxes, fontsize=10,
+                    verticalalignment='top', horizontalalignment='left',
+                    bbox=dict(boxstyle="round,pad=0.4", facecolor="lightyellow", alpha=0.9, edgecolor="orange"))
+        
         ax2.set_xlabel('Cama Adicional #')
         ax2.set_ylabel('Beneficio Marginal Diario por Cama')
-        ax2.set_title('Beneficio Marginal por Cama (Ajustado por Incremento)')
+        ax2.set_title('Beneficio Marginal por Cama')
         ax2.legend()
         ax2.grid(True, alpha=0.3)
+        # Set integer ticks for x-axis
+        ax2.set_xticks(range(min(marginal_beds), max(marginal_beds)+1, max(1, (max(marginal_beds)-min(marginal_beds))//10)))
         
         # Add annotation showing bed increments for first few points
         for i, m in enumerate(marginal_data[:3]):
@@ -242,9 +259,9 @@ class HospitalCapacityAnalyzer:
                            fontsize=8, alpha=0.7)
         
         # Plot 3: NPV Analysis - Separated by type
-        ax3.plot(marginal_beds, npv_operational, 'bo-', linewidth=2, markersize=4, label='VAN Operativo')
-        ax3.plot(marginal_beds, npv_social, 'ro-', linewidth=2, markersize=4, label='VAN Social')
-        ax3.plot(marginal_beds, npv_total, 'go-', linewidth=2, markersize=4, label='VAN Total')
+        ax3.plot(marginal_beds, npv_operational, 'o-', color='red', linewidth=2, markersize=4, label='VAN Operativo')
+        ax3.plot(marginal_beds, npv_social, 'o-', color='green', linewidth=2, markersize=4, label='VAN Social')
+        ax3.plot(marginal_beds, npv_total, 'o-', color='black', linewidth=2, markersize=4, label='VAN Total')
         ax3.axhline(y=0, color='black', linestyle='--', alpha=0.5)
         
         # Find max NPV for operational costs specifically
@@ -259,6 +276,8 @@ class HospitalCapacityAnalyzer:
         ax3.set_title(f'VAN por Tipo de Costo (Tasa: {self.discount_rate:.1%})')
         ax3.legend()
         ax3.grid(True, alpha=0.3)
+        # Set integer ticks for x-axis
+        ax3.set_xticks(range(min(marginal_beds), max(marginal_beds)+1, max(1, (max(marginal_beds)-min(marginal_beds))//10)))
         
         # Plot 4: Additional analysis space (no summary box)
         ax4.axis('off')
@@ -267,6 +286,66 @@ class HospitalCapacityAnalyzer:
         
         # Save plot
         filename = f"analisis_{hospital}_{unit}.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        return filename
+    
+    def create_marginal_benefit_plot(self, hospital: str, unit: str, data: List[Dict], analysis: Dict) -> str:
+        """Create separate plot for marginal benefits analysis"""
+        if not data or not analysis:
+            return ""
+        
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        
+        marginal_data = analysis['marginal_data']
+        marginal_beds = [m['bed_number'] for m in marginal_data]
+        marginal_total = [m['marginal_total'] for m in marginal_data]
+        marginal_social = [m['marginal_social'] for m in marginal_data]
+        marginal_operational = [m['marginal_operational'] for m in marginal_data]
+        npv_total = [m['npv_total'] for m in marginal_data]
+        
+        # Plot Marginal Benefits
+        ax.plot(marginal_beds, marginal_social, 'o-', color='green', linewidth=2, markersize=4, label='Social')
+        ax.plot(marginal_beds, marginal_operational, 'o-', color='red', linewidth=2, markersize=4, label='Operativo')
+        ax.plot(marginal_beds, marginal_total, 'o-', color='black', linewidth=2, markersize=4, label='Total')
+        ax.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+        ax.axvline(x=analysis['last_beneficial_bed'], color='red', linestyle='--', alpha=0.7, 
+                   label=f'Última beneficiosa (+{analysis["last_beneficial_bed"]})')
+        
+        # Find maximum marginal benefit and add VAN annotation
+        if marginal_total:
+            max_marginal_benefit = max(marginal_total)
+            max_marginal_index = marginal_total.index(max_marginal_benefit)
+            max_marginal_bed = marginal_beds[max_marginal_index]
+            max_van_total = npv_total[max_marginal_index]
+            
+            # Add a text box in the upper left corner of the plot
+            ax.text(0.02, 0.98, f'Beneficio Máximo:\n${max_marginal_benefit:.0f}/día (cama +{max_marginal_bed})\nVAN: ${max_van_total:,.0f}', 
+                    transform=ax.transAxes, fontsize=10,
+                    verticalalignment='top', horizontalalignment='left',
+                    bbox=dict(boxstyle="round,pad=0.4", facecolor="lightyellow", alpha=0.9, edgecolor="orange"))
+        
+        # Add annotation showing bed increments for first few points
+        for i, m in enumerate(marginal_data[:3]):
+            if m['bed_increment'] > 1:
+                ax.annotate(f"Δ{m['bed_increment']}", 
+                           xy=(m['bed_number'], m['marginal_total']), 
+                           xytext=(5, 5), textcoords='offset points',
+                           fontsize=8, alpha=0.7)
+        
+        ax.set_xlabel('Cama Adicional #')
+        ax.set_ylabel('Beneficio Marginal Diario por Cama')
+        ax.set_title(f'Beneficio Marginal por Cama - {hospital} {unit}')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        # Set integer ticks for x-axis
+        ax.set_xticks(range(min(marginal_beds), max(marginal_beds)+1, max(1, (max(marginal_beds)-min(marginal_beds))//10)))
+        
+        plt.tight_layout()
+        
+        # Save plot
+        filename = f"beneficio_marginal_{hospital}_{unit}.png"
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close()
         
@@ -294,14 +373,16 @@ class HospitalCapacityAnalyzer:
                 print(f"  No se pudo analizar {hospital} {unit}")
                 continue
             
-            # Create plot
+            # Create plots
             filename = self.create_unit_plot(hospital, unit, data, analysis)
+            marginal_filename = self.create_marginal_benefit_plot(hospital, unit, data, analysis)
             
             # Store results
             self.results[f"{hospital}_{unit}"] = {
                 'data': data,
                 'analysis': analysis,
-                'plot_file': filename
+                'plot_file': filename,
+                'marginal_plot_file': marginal_filename
             }
             
             # Add to summary
@@ -336,6 +417,7 @@ class HospitalCapacityAnalyzer:
         print("Archivos generados:")
         for key, result in self.results.items():
             print(f"  - {result['plot_file']}")
+            print(f"  - {result['marginal_plot_file']}")
         print("  - resumen_analisis_capacidad.png")
         print("  - resumen_analisis_capacidad.csv")
         print("  - promedio_analisis_ICU.png")
@@ -735,14 +817,16 @@ class HospitalCapacityAnalyzer:
         derivacion_pct = [d['porcentaje_derivacion_avg'] for d in avg_data]
         
         # Plot 1: Cost Evolution
-        ax1.plot(beds, social_costs, 'o-', label='Costo Social', linewidth=2, markersize=6)
-        ax1.plot(beds, operational_costs, 's-', label='Costo Operativo', linewidth=2, markersize=6)
-        ax1.plot(beds, total_costs, '^-', label='Costo Total', linewidth=2, markersize=6)
+        ax1.plot(beds, social_costs, 'o-', color='green', label='Costo Social', linewidth=2, markersize=6)
+        ax1.plot(beds, operational_costs, 's-', color='red', label='Costo Operativo', linewidth=2, markersize=6)
+        ax1.plot(beds, total_costs, '^-', color='black', label='Costo Total', linewidth=2, markersize=6)
         ax1.set_xlabel('Incremento de Camas')
         ax1.set_ylabel('Costo Diario Promedio (USD)')
         ax1.set_title(f'Evolución de Costos - {unit_type} (Promedio 3 Hospitales)')
         ax1.legend()
         ax1.grid(True, alpha=0.3)
+        # Set integer ticks for x-axis
+        ax1.set_xticks(range(min(beds), max(beds)+1, max(1, (max(beds)-min(beds))//10)))
         
         # Plot 2: Marginal Benefits per bed
         if marginal_avg:
@@ -752,9 +836,9 @@ class HospitalCapacityAnalyzer:
             bed_increments = [m['bed_increment'] for m in marginal_avg]
             
             # Plot lines instead of bars
-            ax2.plot(marginal_beds, marginal_operational_per_bed, 'o-', 
+            ax2.plot(marginal_beds, marginal_operational_per_bed, 'o-', color='red',
                     label='Beneficio Operativo/Cama', linewidth=2, markersize=6)
-            ax2.plot(marginal_beds, marginal_total_per_bed, 's-', 
+            ax2.plot(marginal_beds, marginal_total_per_bed, 's-', color='black',
                     label='Beneficio Total/Cama', linewidth=2, markersize=6)
             ax2.axhline(y=0, color='red', linestyle='--', alpha=0.5)
             ax2.set_xlabel('Incremento de Camas')
@@ -762,6 +846,8 @@ class HospitalCapacityAnalyzer:
             ax2.set_title(f'Beneficio Marginal por Cama - {unit_type}')
             ax2.legend()
             ax2.grid(True, alpha=0.3)
+            # Set integer ticks for x-axis
+            ax2.set_xticks(range(min(marginal_beds), max(marginal_beds)+1, max(1, (max(marginal_beds)-min(marginal_beds))//10)))
             
             # Add annotations for bed increments where they are not 1
             for i, (bed, increment) in enumerate(zip(marginal_beds, bed_increments)):
@@ -776,9 +862,9 @@ class HospitalCapacityAnalyzer:
             npv_total_per_bed = [m['npv_total_per_bed'] for m in marginal_avg]
             
             # Plot lines instead of bars
-            ax3.plot(marginal_beds, npv_operational_per_bed, 'o-', 
+            ax3.plot(marginal_beds, npv_operational_per_bed, 'o-', color='red',
                     label='VAN Operativo/Cama', linewidth=2, markersize=6)
-            ax3.plot(marginal_beds, npv_total_per_bed, 's-', 
+            ax3.plot(marginal_beds, npv_total_per_bed, 's-', color='black',
                     label='VAN Total/Cama', linewidth=2, markersize=6)
             ax3.axhline(y=0, color='red', linestyle='--', alpha=0.5)
             ax3.set_xlabel('Incremento de Camas')
@@ -786,6 +872,8 @@ class HospitalCapacityAnalyzer:
             ax3.set_title(f'Valor Actual Neto por Cama - {unit_type}')
             ax3.legend()
             ax3.grid(True, alpha=0.3)
+            # Set integer ticks for x-axis
+            ax3.set_xticks(range(min(marginal_beds), max(marginal_beds)+1, max(1, (max(marginal_beds)-min(marginal_beds))//10)))
         
         # Plot 4: Derivation Percentage
         ax4.plot(beds, derivacion_pct, 'ro-', linewidth=2, markersize=6)
